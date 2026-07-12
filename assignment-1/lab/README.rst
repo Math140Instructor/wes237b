@@ -28,7 +28,7 @@ Some properties to pay attention to:
 
 The student is encouraged to relate the device-specific information to the OpenCL memory model, provided below.
 
-.. image:: /lab/.image/memory_model.jpg
+.. image:: .image/memory_model.jpg
   :width: 400
   :alt: OpenCL Memory model
 
@@ -72,7 +72,7 @@ into the world and being able to see whatever the ray hits.  In the case of ray 
 we have a "camera" (i.e. the eye) that produces rays starting from the eye position and 
 going through pixels in a 2D screen.
 
-.. image:: /lab/.image/lightingnoshadow.gif
+.. image:: .image/lightingnoshadow.gif
   :width: 400
   :alt: Raytracing Diagram
 
@@ -104,7 +104,7 @@ blue sphere in the scene results in blue being drawn to the pixel that the prima
 ray goes through.  In other words, the job of a ray in a ray tracer is to simply probe
 the scene to determine which color to draw at each pixel.
 
-.. image:: /lab/.image/raytracerimage2.png
+.. image:: .image/raytracerimage2.png
   :width: 400
   :alt: Raytracing Diagram
 
@@ -171,7 +171,7 @@ the time it took for the program to run was also outputted.  **Note how much tim
 sequential implemenation of the raytracer took**!  We'll see how our next implemenation
 compares.
 
-.. image:: /lab/.image/singlethreadedsequential.png
+.. image:: .image/singlethreadedsequential.png
   :width: 600
   :alt: Single Threaded Sequential Implementation Diagram
 
@@ -196,12 +196,12 @@ What's nice about kernels in OpenCL is that they can be mapped to any compute de
 whether that be a CPU, a GPU, even an FPGA. That's great for us! 
 Depending on Operating system support, we can try running the kernel on a variety of devices.
 
-.. image:: /lab/.image/multithreadedCPUkernel.png
+.. image:: .image/multithreadedCPUkernel.png
   :width: 600
   :alt: Multithreaded Kernel on CPU Diagram
 
 
-.. image:: /lab/.image/multithreadedGPUKernel.png
+.. image:: .image/multithreadedGPUKernel.png
   :width: 600
   :alt: Multithreaded Kernel on GPU Diagram
 
