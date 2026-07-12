@@ -1,0 +1,4 @@
+hufman
+
+*.txt
+!input.txt
