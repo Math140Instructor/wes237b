@@ -91,7 +91,5 @@ int main(int argc, const char * argv[])
 		cout << "FAILURE" << endl;
 		return EXIT_FAILURE;
 	}
-
-
     return 0;
 }
