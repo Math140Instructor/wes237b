@@ -11,5 +11,6 @@ My name is Gabriel Martinez, a Software Engineer at NIWC Pacific focused on rese
 | Lab Reports | Assignments|
 |------|-------------|
 | [Lab #1](./assignment-1/lab/) | [Assignment #1](./assignment-1/homework/) |
+| [Lab #2](./assignment-2/lab/) | [Assignment #2](./assignment-2/homework/) |
 
 Additional weeks will be added as the course progresses.

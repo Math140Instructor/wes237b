@@ -1,0 +1,3 @@
+[submodule "helper_lib"]
+	path = helper_lib
+	url = git@github.com:ucsd-wes-237b/helper_lib.git
