@@ -16,7 +16,8 @@
 #define VECTOR_ADD_2_KERNEL_PATH "vector_add_2.cl"
 #define VECTOR_ADD_4_KERNEL_PATH "vector_add_4.cl"
 
-void initializeOpenCL(cl_device_id* device_id, cl_context* context, cl_command_queue* queue) {
+void initializeOpenCL(cl_device_id *device_id, cl_context *context, cl_command_queue *queue)
+{
     cl_int err;
 
     // Find platforms and devices
@@ -34,21 +35,23 @@ void initializeOpenCL(cl_device_id* device_id, cl_context* context, cl_command_q
     CHECK_ERR(err, "clCreateContext");
 
     // Create a command queue
-# if __APPLE__
+#if __APPLE__
     *queue = clCreateCommandQueue(*context, *device_id, 0, &err);
-# else
+#else
     *queue = clCreateCommandQueueWithProperties(*context, *device_id, 0, &err);
-# endif
+#endif
     CHECK_ERR(err, "clCreateCommandQueueWithProperties");
 }
 
-void callVectorAdd2Kernel(Matrix* a, Matrix* b, Matrix* out, cl_context* context, cl_command_queue* queue) {
+void callVectorAdd2Kernel(Matrix *a, Matrix *b, Matrix *out, cl_context *context, cl_command_queue *queue)
+{
     // OpenCL objects
-    cl_program program;                 // program
-    cl_kernel kernel;         // kernel
+    cl_program program; // program
+    cl_kernel kernel;   // kernel
 
     // OpenCL setup variables
     size_t global_item_size, local_item_size;
+
     cl_int err;
 
     // Device input and output vectors
@@ -64,17 +67,72 @@ void callVectorAdd2Kernel(Matrix* a, Matrix* b, Matrix* out, cl_context* context
     // Build the program executable
     err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
     CHECK_ERR(err, "clBuildProgram");
-    
+
     kernel = clCreateKernel(program, "vectorAdd", &err);
     CHECK_ERR(err, "clCreateKernel");
+
+    // Ensure both matrices are the same shape.
+    if (a->shape[0] != b->shape[0] ||
+        a->shape[1] != b->shape[1])
+    {
+        fprintf(stderr, "Matrix dimensions do not match.\n");
+        return;
+    }
 
     // Allocate GPU memory
     //@@ Create memory buffers for input and output vectors
 
+    unsigned int size_a = a->shape[0] * a->shape[1];
+    size_t buffer_size = size_a * sizeof(int);
+
+    device_input_1 = clCreateBuffer(*context,
+                                    CL_MEM_READ_ONLY,
+                                    buffer_size,
+                                    NULL,
+                                    &err);
+    CHECK_ERR(err, "clCreateBuffer input 1");
+    device_input_2 = clCreateBuffer(*context,
+                                    CL_MEM_READ_ONLY,
+                                    buffer_size,
+                                    NULL,
+                                    &err);
+    CHECK_ERR(err, "clCreateBuffer input 2");
+    device_output = clCreateBuffer(*context,
+                                   CL_MEM_WRITE_ONLY,
+                                   buffer_size,
+                                   NULL,
+                                   &err);
+    CHECK_ERR(err, "clCreateBuffer output");
+
     //@@ Copy memory to the GPU here
+    err = clEnqueueWriteBuffer(*queue,
+                               device_input_1,
+                               CL_TRUE,
+                               0,
+                               buffer_size,
+                               a->data,
+                               0,
+                               NULL,
+                               NULL);
+    CHECK_ERR(err, "clEnqueueWriteBuffer input 1");
+
+    err = clEnqueueWriteBuffer(*queue,
+                               device_input_2,
+                               CL_TRUE,
+                               0,
+                               buffer_size,
+                               b->data,
+                               0,
+                               NULL,
+                               NULL);
+    CHECK_ERR(err, "clEnqueueWriteBuffer input 2");
 
     //@@ define local and global work sizes
-    unsigned int size_a = 0; // @@ replace this with length of the input vector(s)
+    // unsigned int size_a = 0; // @@ replace this with length of the input vector(s)
+    local_item_size = 64;
+    global_item_size = ((size_a + local_item_size - 1) / local_item_size) * local_item_size;
+    // local_item_size = NULL; // let OpenCL decide
+    // global_item_size = size_a;
 
     // Set the arguments to the kernel
     err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &device_input_1);
@@ -87,22 +145,48 @@ void callVectorAdd2Kernel(Matrix* a, Matrix* b, Matrix* out, cl_context* context
     CHECK_ERR(err, "clSetKernelArg 3");
 
     //@@ Launch the GPU Kernel here
+    err = clEnqueueNDRangeKernel(*queue,
+                                 kernel,
+                                 1,
+                                 NULL,
+                                 &global_item_size,
+                                 &local_item_size,
+                                 0,
+                                 NULL,
+                                 NULL);
+    CHECK_ERR(err, "clEnqueueNDRangeKernel");
 
     //@@ Copy the GPU memory back to the CPU here
+    err = clEnqueueReadBuffer(*queue,
+                              device_output,
+                              CL_TRUE,
+                              0,
+                              buffer_size,
+                              out->data,
+                              0,
+                              NULL,
+                              NULL);
+    CHECK_ERR(err, "clEnqueueReadBuffer output");
 
     //@@ Free the GPU memory here
+    clReleaseMemObject(device_input_1);
+    clReleaseMemObject(device_input_2);
+    clReleaseMemObject(device_output);
+    clReleaseKernel(kernel);
+    clReleaseProgram(program);
 
     // Release Host Memory
     free(kernel_source);
 }
 
-void part1(Matrix* host_input_1, Matrix* host_input_2, Matrix* host_input_3, Matrix* host_input_4, Matrix* host_output, Matrix* answer, const char* output_file) {
+void part1(Matrix *host_input_1, Matrix *host_input_2, Matrix *host_input_3, Matrix *host_input_4, Matrix *host_output, Matrix *answer, const char *output_file)
+{
     // Start of program one
 
     // OpenCL objects
-    cl_device_id device_id;             // device ID
-    cl_context context;                 // context
-    cl_command_queue queue;             // command queue
+    cl_device_id device_id; // device ID
+    cl_context context;     // context
+    cl_command_queue queue; // command queue
 
     initializeOpenCL(&device_id, &context, &queue);
 
@@ -121,12 +205,15 @@ void part1(Matrix* host_input_1, Matrix* host_input_2, Matrix* host_input_3, Mat
     SaveMatrix(output_file, host_output);
 
     //@@ Release OpenCL objects here
+    clReleaseCommandQueue(queue);
+    clReleaseContext(context);
 }
 
-void callVectorAdd4Kernel(Matrix* a, Matrix* b, Matrix* c, Matrix* d, Matrix* out, cl_context* context, cl_command_queue* queue) {
+void callVectorAdd4Kernel(Matrix *a, Matrix *b, Matrix *c, Matrix *d, Matrix *out, cl_context *context, cl_command_queue *queue)
+{
     // OpenCL objects
-    cl_program program;                 // program
-    cl_kernel kernel;         // kernel
+    cl_program program; // program
+    cl_kernel kernel;   // kernel
 
     // OpenCL setup variables
     size_t global_item_size, local_item_size;
@@ -145,49 +232,158 @@ void callVectorAdd4Kernel(Matrix* a, Matrix* b, Matrix* c, Matrix* d, Matrix* ou
     // Build the program executable
     err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
     CHECK_ERR(err, "clBuildProgram");
-    
+
     kernel = clCreateKernel(program, "vectorAdd", &err);
     CHECK_ERR(err, "clCreateKernel");
 
+    // assume same size to save me some time :)
     // Allocate GPU memory
     //@@ Create memory buffers for input and output vectors
+    unsigned int size_a = a->shape[0] * a->shape[1];
+    size_t buffer_size = size_a * sizeof(int);
+
+    device_input_1 = clCreateBuffer(*context,
+                                    CL_MEM_READ_ONLY,
+                                    buffer_size,
+                                    NULL,
+                                    &err);
+    CHECK_ERR(err, "clCreateBuffer input 1");
+    device_input_2 = clCreateBuffer(*context,
+                                    CL_MEM_READ_ONLY,
+                                    buffer_size,
+                                    NULL,
+                                    &err);
+    CHECK_ERR(err, "clCreateBuffer input 2");
+    device_input_3 = clCreateBuffer(*context,
+                                    CL_MEM_READ_ONLY,
+                                    buffer_size,
+                                    NULL,
+                                    &err);
+    CHECK_ERR(err, "clCreateBuffer input 3");
+    device_input_4 = clCreateBuffer(*context,
+                                    CL_MEM_READ_ONLY,
+                                    buffer_size,
+                                    NULL,
+                                    &err);
+    CHECK_ERR(err, "clCreateBuffer input 4");
+
+    device_output = clCreateBuffer(*context,
+                                   CL_MEM_WRITE_ONLY,
+                                   buffer_size,
+                                   NULL,
+                                   &err);
+    CHECK_ERR(err, "clCreateBuffer output");
 
     //@@ Copy memory to the GPU here
+    err = clEnqueueWriteBuffer(*queue,
+                               device_input_1,
+                               CL_TRUE,
+                               0,
+                               buffer_size,
+                               a->data,
+                               0,
+                               NULL,
+                               NULL);
+    CHECK_ERR(err, "clEnqueueWriteBuffer input 1");
+
+    err = clEnqueueWriteBuffer(*queue,
+                               device_input_2,
+                               CL_TRUE,
+                               0,
+                               buffer_size,
+                               b->data,
+                               0,
+                               NULL,
+                               NULL);
+    CHECK_ERR(err, "clEnqueueWriteBuffer input 2");
+
+    err = clEnqueueWriteBuffer(*queue,
+                               device_input_3,
+                               CL_TRUE,
+                               0,
+                               buffer_size,
+                               c->data,
+                               0,
+                               NULL,
+                               NULL);
+    CHECK_ERR(err, "clEnqueueWriteBuffer input 3");
+    err = clEnqueueWriteBuffer(*queue,
+                               device_input_4,
+                               CL_TRUE,
+                               0,
+                               buffer_size,
+                               d->data,
+                               0,
+                               NULL,
+                               NULL);
+    CHECK_ERR(err, "clEnqueueWriteBuffer input 4");
 
     //@@ define local and global work sizes
-    unsigned int size_a = 0; // @@ replace this with length of the input vector(s)
+    // unsigned int size_a = 0; // @@ replace this with length of the input vector(s)
+    local_item_size = 64;
+    global_item_size = ((size_a + local_item_size - 1) / local_item_size) * local_item_size;
+    // local_item_size = NULL; // let OpenCL decide
+    // global_item_size = size_a;
 
     // Set the arguments to the kernel
     err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &device_input_1);
     CHECK_ERR(err, "clSetKernelArg 0");
     err |= clSetKernelArg(kernel, 1, sizeof(cl_mem), &device_input_2);
     CHECK_ERR(err, "clSetKernelArg 1");
-    err |= clSetKernelArg(kernel, 2, sizeof(cl_mem), &device_input_3);
-    CHECK_ERR(err, "clSetKernelArg 2");
+    err = clSetKernelArg(kernel, 2, sizeof(cl_mem), &device_input_3);
+    CHECK_ERR(err, "clSetKernelArg 0");
     err |= clSetKernelArg(kernel, 3, sizeof(cl_mem), &device_input_4);
-    CHECK_ERR(err, "clSetKernelArg 3");
+    CHECK_ERR(err, "clSetKernelArg 1");
     err |= clSetKernelArg(kernel, 4, sizeof(cl_mem), &device_output);
-    CHECK_ERR(err, "clSetKernelArg 4");
+    CHECK_ERR(err, "clSetKernelArg 2");
     err |= clSetKernelArg(kernel, 5, sizeof(unsigned int), &size_a);
-    CHECK_ERR(err, "clSetKernelArg 5");
+    CHECK_ERR(err, "clSetKernelArg 3");
 
     //@@ Launch the GPU Kernel here
+    err = clEnqueueNDRangeKernel(*queue,
+                                 kernel,
+                                 1,
+                                 NULL,
+                                 &global_item_size,
+                                 &local_item_size,
+                                 0,
+                                 NULL,
+                                 NULL);
+    CHECK_ERR(err, "clEnqueueNDRangeKernel");
 
     //@@ Copy the GPU memory back to the CPU here
+    err = clEnqueueReadBuffer(*queue,
+                              device_output,
+                              CL_TRUE,
+                              0,
+                              buffer_size,
+                              out->data,
+                              0,
+                              NULL,
+                              NULL);
+    CHECK_ERR(err, "clEnqueueReadBuffer output");
 
     //@@ Free the GPU memory here
+    clReleaseMemObject(device_input_1);
+    clReleaseMemObject(device_input_2);
+    clReleaseMemObject(device_input_3);
+    clReleaseMemObject(device_input_4);
+    clReleaseMemObject(device_output);
+    clReleaseKernel(kernel);
+    clReleaseProgram(program);
 
     // Release Host Memory
     free(kernel_source);
 }
 
-void part2(Matrix* host_input_1, Matrix* host_input_2, Matrix* host_input_3, Matrix* host_input_4, Matrix* host_output, Matrix* answer, const char* output_file) {
+void part2(Matrix *host_input_1, Matrix *host_input_2, Matrix *host_input_3, Matrix *host_input_4, Matrix *host_output, Matrix *answer, const char *output_file)
+{
     // Start of program two
 
     // OpenCL objects
-    cl_device_id device_id;             // device ID
-    cl_context context;                 // context
-    cl_command_queue queue;             // command queue
+    cl_device_id device_id; // device ID
+    cl_context context;     // context
+    cl_command_queue queue; // command queue
 
     initializeOpenCL(&device_id, &context, &queue);
 
@@ -204,6 +400,8 @@ void part2(Matrix* host_input_1, Matrix* host_input_2, Matrix* host_input_3, Mat
     SaveMatrix(output_file, host_output);
 
     //@@ Release OpenCL objects here
+    clReleaseCommandQueue(queue);
+    clReleaseContext(context);
 }
 
 int main(int argc, char *argv[])
@@ -249,17 +447,14 @@ int main(int argc, char *argv[])
     clock_t start, end;
     double cpu_time_used;
 
-
-    
-
     // =================================================================
     printf("==============Starting Program 1==============\n");
     start = clock();
 
     part1(&host_input_1, &host_input_2, &host_input_3, &host_input_4, &host_output, &answer, program_1_output_file);
-    
+
     end = clock();
-    cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC * 1000; // Convert to milliseconds
+    cpu_time_used = ((double)(end - start)) / CLOCKS_PER_SEC * 1000; // Convert to milliseconds
 
     printf("Execution time: %.2fms\n", cpu_time_used);
     printf("==============Finished Program 1==============\n");
@@ -273,15 +468,11 @@ int main(int argc, char *argv[])
     start = clock();
 
     part2(&host_input_1, &host_input_2, &host_input_3, &host_input_4, &host_output, &answer, program_2_output_file);
-    
+
     end = clock();
-    cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC * 1000; // Convert to milliseconds
+    cpu_time_used = ((double)(end - start)) / CLOCKS_PER_SEC * 1000; // Convert to milliseconds
     printf("Execution time: %.2fms\n", cpu_time_used);
     printf("==============Finished Program 2==============\n");
-
-
-
-
 
     // Release host memory
     free(host_input_1.data);
