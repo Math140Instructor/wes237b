@@ -2,7 +2,7 @@
 ## Huffman Encoding
 
 ./huffman input.txt code.txt output.txt 
-
+./huffman test.txt code.txt output.txt 
 ## Vector Add
 
 ./solution Dataset/0/input0.raw Dataset/0/input1.raw Dataset/0/input2.raw Dataset/0/input3.raw Dataset/0/output.raw part1output.raw part2output.raw 

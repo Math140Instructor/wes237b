@@ -4,6 +4,8 @@
 #include <iostream>
 #include <queue>
 #include <string>
+#include <cmath>
+#include <map>
 
 using namespace std;
 
@@ -22,7 +24,7 @@ struct CompareNode
 	{
 		if (left.freq == right.freq)
 		{
-			return left.index > right.index;
+			return left.index < right.index;
 		}
 
 		return left.freq > right.freq;
@@ -30,24 +32,11 @@ struct CompareNode
 };
 
 // Helpers
-vector<Node> histogram(
-	const unsigned char *bufin,
-	unsigned int bufinlen);
-void printTree(
-	const vector<Node> &nodes,
-	int index,
-	string code);
-void generateCodes(const vector<Node> &nodes,
-				   int nodeIndex,
-				   const string &currentCode,
-				   array<string, 256> &codes);
-void writeUint32(
-	unsigned char *buffer,
-	unsigned int position,
-	unsigned int value);
-unsigned int readUint32(
-	const unsigned char *buffer,
-	unsigned int position);
+vector<Node> histogram(const unsigned char *bufin, unsigned int bufinlen);
+void printTree(const vector<Node> &nodes, int index, string code);
+void generateCodes(const vector<Node> &nodes, int nodeIndex, const string &currentCode, std::map<unsigned char, string> &codes);
+void writeUint32(unsigned char *buffer, unsigned int position, unsigned int value);
+unsigned int readUint32(const unsigned char *buffer, unsigned int position);
 
 /**
  * Create histogram
@@ -64,18 +53,23 @@ int huffman_encode(const unsigned char *bufin,
 				   unsigned char **pbufout,
 				   unsigned int *pbufoutlen)
 {
+	if (pbufout == nullptr || pbufoutlen == nullptr)
+	{
+		return -1;
+	}
+
+	*pbufout = nullptr;
+	*pbufoutlen = 0;
+
+	if (bufin == nullptr || bufinlen == 0)
+	{
+		return 0;
+	}
+
 	vector<Node> frequencies = histogram(bufin, bufinlen);
+	const std::vector<Node> originalFrequencies = frequencies;
 
-	unsigned int leafCount =
-		static_cast<unsigned int>(frequencies.size());
-
-	priority_queue<
-		Node,
-		vector<Node>,
-		CompareNode>
-		minHeap(
-			CompareNode{},
-			frequencies);
+	priority_queue<Node, vector<Node>, CompareNode> minHeap(CompareNode{}, frequencies);
 
 	// DEBUG
 	auto debugHeap = minHeap;
@@ -105,8 +99,7 @@ int huffman_encode(const unsigned char *bufin,
 		parent.freq = left.freq + right.freq;
 		parent.leftIndex = left.index;
 		parent.rightIndex = right.index;
-		parent.index =
-			static_cast<int>(frequencies.size());
+		parent.index = static_cast<int>(frequencies.size());
 
 		frequencies.push_back(parent);
 		minHeap.push(parent);
@@ -118,101 +111,83 @@ int huffman_encode(const unsigned char *bufin,
 	 * DEBUG
 	 */
 	cout << "\nHuffman Tree Codes:\n";
-
+	int leafCount = originalFrequencies.size();
 	if (leafCount == 1)
 	{
-		cout << frequencies[0].letter
+		cout << originalFrequencies[0].letter
 			 << " = 0"
 			 << endl;
 	}
 	else
 	{
-		printTree(
-			frequencies,
-			rootIndex,
-			"");
+		printTree(frequencies, rootIndex, "");
 	} // end debug
 
 	// Generate symbol codewords
-	array<string, 256> codes{};
-	generateCodes(
-		frequencies,
-		rootIndex,
-		"",
-		codes);
+	std::map<unsigned char, string> codes;
+	generateCodes(frequencies, rootIndex, "", codes);
 
 	if (leafCount == 1)
 	{
 		codes[frequencies[0].letter] = "0";
 	}
 
-	// Count encoded bits
+	// Count encoded bits for each symbol
+	// Count encoded bits using only histogram leaf nodes
 	unsigned int encodedBitCount = 0;
-	for (unsigned int i = 0; i < bufinlen; ++i)
-	{
-		encodedBitCount +=
-			static_cast<unsigned int>(
-				codes[bufin[i]].size());
-	}
 
-	unsigned int encodedByteCount =
-		(encodedBitCount + 7) / 8;
-
-	unsigned int headerSize =
-		4 + (256 * 4);
-
-	*pbufoutlen =
-		headerSize + encodedByteCount;
-
-	*pbufout =
-		new unsigned char[*pbufoutlen]{};
-
-	// Store original input length
-	writeUint32(
-		*pbufout,
-		0,
-		bufinlen);
-
-	// Store frequency table
-	array<unsigned int, 256> frequencyTable{};
 	for (unsigned int i = 0; i < leafCount; ++i)
 	{
-		frequencyTable[frequencies[i].letter] =
-			frequencies[i].freq;
+		encodedBitCount +=
+			frequencies[i].freq *
+			static_cast<unsigned int>(
+				codes[frequencies[i].letter].size());
 	}
 
-	unsigned int outputPosition = 4;
-	for (unsigned int symbol = 0;
-		 symbol < frequencyTable.size();
-		 ++symbol)
+	// convert to total bits to bytes
+	unsigned int encodedByteCount = static_cast<unsigned int>(std::ceil(encodedBitCount / 8.0));
+	// unsigned int is 4bytes, each symbol is 1 byte (char) so 5bytes per entry
+	// plus 4bytes
+	// plus 4bytes
+
+	unsigned int headerSize =
+		sizeof(unsigned int) +										// input length
+		sizeof(unsigned int) +										// number of histogram entries
+		leafCount * (sizeof(unsigned char) + sizeof(unsigned int)); // each entry
+
+	*pbufoutlen = headerSize + encodedByteCount;
+	*pbufout = new unsigned char[*pbufoutlen]{};
+
+	// Store original input length
+	writeUint32(*pbufout, 0, bufinlen);
+	// Next 4 bytes: number of histogram entries
+	writeUint32(*pbufout, sizeof(unsigned int), leafCount);
+	// Store frequency table
+	unsigned int outputPosition = sizeof(unsigned int) + sizeof(unsigned int);
+
+	for (unsigned int i = 0; i < leafCount; ++i)
 	{
-		writeUint32(
-			*pbufout,
-			outputPosition,
-			frequencyTable[symbol]);
-
-		outputPosition += 4;
+		// 1 byte: symbol
+		(*pbufout)[outputPosition] = originalFrequencies[i].letter;
+		outputPosition += sizeof(unsigned char);
+		// 4 bytes: frequency
+		writeUint32(*pbufout, outputPosition, originalFrequencies[i].freq);
+		outputPosition += sizeof(unsigned int);
 	}
 
-	// Encode input
+	// Encode input symbols using the code words
 	unsigned int bitPosition = 0;
 	for (unsigned int i = 0; i < bufinlen; ++i)
 	{
-		const string &code =
-			codes[bufin[i]];
-
+		const string &code = codes[bufin[i]];
 		for (char bit : code)
 		{
-			unsigned int byteIndex =
-				headerSize + (bitPosition / 8);
-
-			unsigned int bitIndex =
-				7 - (bitPosition % 8);
+			unsigned int byteIndex = headerSize + (bitPosition / 8);
+			unsigned int bitIndex = 7 - (bitPosition % 8);
 
 			if (bit == '1')
 			{
-				(*pbufout)[byteIndex] |=
-					1 << bitIndex;
+				(*pbufout)[byteIndex] |= 1 << bitIndex; // turn bit on
 			}
 
 			++bitPosition;
@@ -222,10 +197,7 @@ int huffman_encode(const unsigned char *bufin,
 	return 0;
 }
 
-void generateCodes(const vector<Node> &nodes,
-				   int nodeIndex,
-				   const string &currentCode,
-				   array<string, 256> &codes)
+void generateCodes(const vector<Node> &nodes, int nodeIndex, const string &currentCode, std::map<unsigned char, string> &codes)
 {
 	const Node &node = nodes[nodeIndex];
 
@@ -236,29 +208,20 @@ void generateCodes(const vector<Node> &nodes,
 		return;
 	}
 
+	// Add a zero for left child
 	if (node.leftIndex != -1)
 	{
-		generateCodes(
-			nodes,
-			node.leftIndex,
-			currentCode + "0",
-			codes);
+		generateCodes(nodes, node.leftIndex, currentCode + "0", codes);
 	}
 
+	// Add a 1 for right child
 	if (node.rightIndex != -1)
 	{
-		generateCodes(
-			nodes,
-			node.rightIndex,
-			currentCode + "1",
-			codes);
+		generateCodes(nodes, node.rightIndex, currentCode + "1", codes);
 	}
 }
 
-void printTree(
-	const vector<Node> &nodes,
-	int index,
-	string code)
+void printTree(const vector<Node> &nodes, int index, string code)
 {
 	const Node &node = nodes[index];
 
@@ -280,8 +243,7 @@ void printTree(
 	printTree(nodes, node.rightIndex, code + "1");
 }
 
-vector<Node> histogram(const unsigned char *bufin,
-					   unsigned int bufinlen)
+vector<Node> histogram(const unsigned char *bufin, unsigned int bufinlen)
 {
 	vector<Node> result;
 
@@ -290,48 +252,39 @@ vector<Node> histogram(const unsigned char *bufin,
 		return result;
 	}
 
-	// Max unsigned-char values is 255.
-	array<unsigned int, 256> counts{};
-
+	// Max unsigned char values is 255.
+	// array<unsigned int, 256> counts{};
+	map<unsigned char, unsigned int> counts;
+	// calculate frequency from input symbols
 	for (unsigned int i = 0; i < bufinlen; ++i)
 	{
 		++counts[bufin[i]];
 	}
 
-	// Only create nodes for symbols that actually appeared.
-	for (unsigned int symbol = 0; symbol < counts.size(); ++symbol)
+	// create nodes
+	for (const auto &entry : counts)
 	{
-		if (counts[symbol] > 0)
-		{
-			Node node;
-			node.letter = static_cast<unsigned char>(symbol);
-			node.freq = counts[symbol];
-			node.index = static_cast<int>(result.size());
-			node.leftIndex = -1;
-			node.rightIndex = -1;
+		Node node;
+		node.letter = entry.first;
+		node.freq = entry.second;
+		node.index = static_cast<int>(result.size());
+		node.leftIndex = -1;
+		node.rightIndex = -1;
 
-			result.emplace_back(node);
-		}
+		result.push_back(node);
 	}
 
-	return result;
+	return result; // sorted histogram
 }
-void writeUint32(
-	unsigned char *buffer,
-	unsigned int position,
-	unsigned int value)
+// transform unsigned int (4 bytes) to char (1 byte)
+// 32bits to 8bits
+// so need to partition value into 4 segments of 8bits
+void writeUint32(unsigned char *buffer, unsigned int position, unsigned int value)
 {
-	buffer[position] =
-		static_cast<unsigned char>(value & 0xFF);
-
-	buffer[position + 1] =
-		static_cast<unsigned char>((value >> 8) & 0xFF);
-
-	buffer[position + 2] =
-		static_cast<unsigned char>((value >> 16) & 0xFF);
-
-	buffer[position + 3] =
-		static_cast<unsigned char>((value >> 24) & 0xFF);
+	buffer[position] = static_cast<unsigned char>(value & 0xFF);			 // first 1byte
+	buffer[position + 1] = static_cast<unsigned char>((value >> 8) & 0xFF);	 // 2nd byte
+	buffer[position + 2] = static_cast<unsigned char>((value >> 16) & 0xFF); // 3rd byte
+	buffer[position + 3] = static_cast<unsigned char>((value >> 24) & 0xFF); // 4th byte
 }
 
 /**
@@ -346,46 +299,37 @@ int huffman_decode(const unsigned char *bufin,
 				   unsigned char **pbufout,
 				   unsigned int *pbufoutlen)
 {
-	unsigned int originalLength =
-		readUint32(bufin, 0);
+
+	unsigned int originalLength = readUint32(bufin, 0);
+	unsigned int leafCount = readUint32(bufin, sizeof(unsigned int));
+	unsigned int inputPosition = sizeof(unsigned int) + sizeof(unsigned int);
 
 	*pbufoutlen = originalLength;
 	*pbufout = new unsigned char[originalLength];
 
 	vector<Node> frequencies;
 
-	unsigned int inputPosition = 4;
-
-	// Read the 256 stored frequencies.
-	for (unsigned int symbol = 0; symbol < 256; ++symbol)
+	for (unsigned int i = 0; i < leafCount; ++i)
 	{
-		unsigned int frequency =
-			readUint32(bufin, inputPosition);
+		unsigned char symbol = bufin[inputPosition];
 
-		inputPosition += 4;
+		inputPosition += sizeof(unsigned char);
 
-		if (frequency > 0)
-		{
-			Node node;
-			node.letter =
-				static_cast<unsigned char>(symbol);
-			node.freq = frequency;
-			node.index =
-				static_cast<int>(frequencies.size());
-			node.leftIndex = -1;
-			node.rightIndex = -1;
+		unsigned int frequency = readUint32(bufin, inputPosition);
 
-			frequencies.push_back(node);
-		}
+		inputPosition += sizeof(unsigned int);
+
+		Node node;
+		node.letter = symbol;
+		node.freq = frequency;
+		node.index = static_cast<int>(frequencies.size());
+		node.leftIndex = -1;
+		node.rightIndex = -1;
+
+		frequencies.push_back(node);
 	}
 
-	priority_queue<
-		Node,
-		vector<Node>,
-		CompareNode>
-		minHeap(
-			CompareNode{},
-			frequencies);
+	priority_queue<Node, vector<Node>, CompareNode> minHeap(CompareNode{}, frequencies);
 
 	// Rebuild the Huffman tree.
 	while (minHeap.size() > 1)
@@ -401,9 +345,7 @@ int huffman_decode(const unsigned char *bufin,
 		parent.freq = left.freq + right.freq;
 		parent.leftIndex = left.index;
 		parent.rightIndex = right.index;
-		parent.index =
-			static_cast<int>(frequencies.size());
-
+		parent.index = static_cast<int>(frequencies.size());
 		frequencies.push_back(parent);
 		minHeap.push(parent);
 	}
@@ -423,9 +365,7 @@ int huffman_decode(const unsigned char *bufin,
 		return 0;
 	}
 
-	unsigned int headerSize =
-		4 + (256 * 4);
-
+	unsigned int headerSize = sizeof(unsigned int) + sizeof(unsigned int) + leafCount * (sizeof(unsigned char) + sizeof(unsigned int));
 	unsigned int bitPosition = 0;
 	unsigned int outputPosition = 0;
 	int currentIndex = rootIndex;
@@ -433,38 +373,27 @@ int huffman_decode(const unsigned char *bufin,
 	// Decode bits until the original number of bytes is restored.
 	while (outputPosition < originalLength)
 	{
-		unsigned int byteIndex =
-			headerSize + (bitPosition / 8);
-
-		unsigned int bitIndex =
-			7 - (bitPosition % 8);
-
-		unsigned char bit =
-			(bufin[byteIndex] >> bitIndex) & 1;
+		unsigned int byteIndex = headerSize + (bitPosition / 8);
+		unsigned int bitIndex = 7 - (bitPosition % 8);
+		unsigned char bit = (bufin[byteIndex] >> bitIndex) & 1;
 
 		if (bit == 0)
 		{
-			currentIndex =
-				frequencies[currentIndex].leftIndex;
+			currentIndex = frequencies[currentIndex].leftIndex;
 		}
 		else
 		{
-			currentIndex =
-				frequencies[currentIndex].rightIndex;
+			currentIndex = frequencies[currentIndex].rightIndex;
 		}
 
 		++bitPosition;
 
-		const Node &node =
-			frequencies[currentIndex];
+		const Node &node = frequencies[currentIndex];
 
 		// Reached a leaf node.
-		if (node.leftIndex == -1 &&
-			node.rightIndex == -1)
+		if (node.leftIndex == -1 && node.rightIndex == -1)
 		{
-			(*pbufout)[outputPosition] =
-				node.letter;
-
+			(*pbufout)[outputPosition] = node.letter;
 			++outputPosition;
 			currentIndex = rootIndex;
 		}
@@ -473,28 +402,14 @@ int huffman_decode(const unsigned char *bufin,
 	return 0;
 }
 
-unsigned int readUint32(
-	const unsigned char *buffer,
-	unsigned int position)
+unsigned int readUint32(const unsigned char *buffer, unsigned int position)
 {
 	unsigned int value = 0;
 
 	value |= buffer[position];
-
-	value |=
-		static_cast<unsigned int>(
-			buffer[position + 1])
-		<< 8;
-
-	value |=
-		static_cast<unsigned int>(
-			buffer[position + 2])
-		<< 16;
-
-	value |=
-		static_cast<unsigned int>(
-			buffer[position + 3])
-		<< 24;
+	value |= static_cast<unsigned int>(buffer[position + 1]) << 8;
+	value |= static_cast<unsigned int>(buffer[position + 2]) << 16;
+	value |= static_cast<unsigned int>(buffer[position + 3]) << 24;
 
 	return value;
 }
