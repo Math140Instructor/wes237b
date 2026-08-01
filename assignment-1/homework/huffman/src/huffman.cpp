@@ -62,14 +62,13 @@ int huffman_encode(const unsigned char *bufin, unsigned int bufinlen, unsigned c
   priority_queue<Node, vector<Node>, CompareNode> minHeap(CompareNode{}, frequencies);
 
   // DEBUG
-  auto debugHeap = minHeap;
+  //   auto debugHeap = minHeap;
+  //   while (!debugHeap.empty()) {
+  //     Node node = debugHeap.top();
+  //     debugHeap.pop();
 
-  while (!debugHeap.empty()) {
-    Node node = debugHeap.top();
-    debugHeap.pop();
-
-    cout << static_cast<char>(node.letter) << ": " << node.freq << endl;
-  } // end debug
+  //     cout << static_cast<char>(node.letter) << ": " << node.freq << endl;
+  //   } // end debug
 
   // Build Huffman tree
   while (minHeap.size() > 1) {
@@ -95,13 +94,13 @@ int huffman_encode(const unsigned char *bufin, unsigned int bufinlen, unsigned c
   /**
    * DEBUG
    */
-  cout << "\nHuffman Tree Codes:\n";
+  // cout << "\nHuffman Tree Codes:\n";
   int leafCount = originalFrequencies.size();
-  if (leafCount == 1) {
-    cout << originalFrequencies[0].letter << " = 0" << endl;
-  } else {
-    printTree(frequencies, rootIndex, "");
-  } // end debug
+  //   if (leafCount == 1) {
+  //     cout << originalFrequencies[0].letter << " = 0" << endl;
+  //   } else {
+  //     printTree(frequencies, rootIndex, "");
+  //   } // end debug
 
   // Generate symbol codewords
   std::map<unsigned char, string> codes;
