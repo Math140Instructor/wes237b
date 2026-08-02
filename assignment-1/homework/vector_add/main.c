@@ -42,12 +42,22 @@ void initializeOpenCL(cl_device_id *device_id, cl_context *context, cl_command_q
 }
 
 void callVectorAdd2Kernel(Matrix *a, Matrix *b, Matrix *out, cl_context *context, cl_command_queue *queue) {
+  // Validate matrix dimensions before creating OpenCL resources.
+  if (a->shape[0] != b->shape[0] || a->shape[1] != b->shape[1] || out->shape[0] != a->shape[0] || out->shape[1] != a->shape[1]) {
+    return;
+  }
+
+  unsigned int size_a = a->shape[0] * a->shape[1];
+
+  if (size_a == 0) {
+    return;
+  }
   // OpenCL objects
   cl_program program; // program
   cl_kernel kernel;   // kernel
 
   // OpenCL setup variables
-  size_t global_item_size, local_item_size;
+  size_t global_item_size = 0; //, local_item_size = 4;
 
   cl_int err;
 
@@ -68,16 +78,10 @@ void callVectorAdd2Kernel(Matrix *a, Matrix *b, Matrix *out, cl_context *context
   kernel = clCreateKernel(program, "vectorAdd", &err);
   CHECK_ERR(err, "clCreateKernel");
 
-  // Ensure both matrices are the same shape.
-  if (a->shape[0] != b->shape[0] || a->shape[1] != b->shape[1]) {
-    fprintf(stderr, "Matrix dimensions do not match.\n");
-    return;
-  }
-
   // Allocate GPU memory
   //@@ Create memory buffers for input and output vectors
 
-  unsigned int size_a = a->shape[0] * a->shape[1];
+  //unsigned int size_a = a->shape[0] * a->shape[1];
   size_t buffer_size = size_a * sizeof(int);
 
   device_input_1 = clCreateBuffer(*context, CL_MEM_READ_ONLY, buffer_size, NULL, &err);
@@ -96,10 +100,10 @@ void callVectorAdd2Kernel(Matrix *a, Matrix *b, Matrix *out, cl_context *context
 
   //@@ define local and global work sizes
   // unsigned int size_a = 0; // @@ replace this with length of the input vector(s)
-  local_item_size = 64;
-  global_item_size = ((size_a + local_item_size - 1) / local_item_size) * local_item_size;
-  // local_item_size = NULL; // let OpenCL decide
-  // global_item_size = size_a;
+  // local_item_size = 64;
+  // global_item_size = ((size_a + local_item_size - 1) / local_item_size) * local_item_size;
+  //  local_item_size = NULL; // let OpenCL decide
+  global_item_size = size_a;
 
   // Set the arguments to the kernel
   err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &device_input_1);
@@ -112,7 +116,7 @@ void callVectorAdd2Kernel(Matrix *a, Matrix *b, Matrix *out, cl_context *context
   CHECK_ERR(err, "clSetKernelArg 3");
 
   //@@ Launch the GPU Kernel here
-  err = clEnqueueNDRangeKernel(*queue, kernel, 1, NULL, &global_item_size, &local_item_size, 0, NULL, NULL);
+  err = clEnqueueNDRangeKernel(*queue, kernel, 1, NULL, &global_item_size, NULL, 0, NULL, NULL);
   CHECK_ERR(err, "clEnqueueNDRangeKernel");
 
   //@@ Copy the GPU memory back to the CPU here
@@ -160,12 +164,22 @@ void part1(Matrix *host_input_1, Matrix *host_input_2, Matrix *host_input_3, Mat
 }
 
 void callVectorAdd4Kernel(Matrix *a, Matrix *b, Matrix *c, Matrix *d, Matrix *out, cl_context *context, cl_command_queue *queue) {
+  // Validate all matrix dimensions before creating OpenCL resources.
+  if (a->shape[0] != b->shape[0] || a->shape[1] != b->shape[1] || a->shape[0] != c->shape[0] || a->shape[1] != c->shape[1] || a->shape[0] != d->shape[0] || a->shape[1] != d->shape[1] || out->shape[0] != a->shape[0] || out->shape[1] != a->shape[1]) {
+    return;
+  }
+
+  unsigned int size_a = a->shape[0] * a->shape[1];
+
+  if (size_a == 0) {
+    return;
+  }
   // OpenCL objects
   cl_program program; // program
   cl_kernel kernel;   // kernel
 
   // OpenCL setup variables
-  size_t global_item_size, local_item_size;
+  size_t global_item_size = 0; // = 4;
   cl_int err;
 
   // Device input and output vectors
@@ -188,7 +202,7 @@ void callVectorAdd4Kernel(Matrix *a, Matrix *b, Matrix *c, Matrix *d, Matrix *ou
   // assume same size to save me some time :)
   // Allocate GPU memory
   //@@ Create memory buffers for input and output vectors
-  unsigned int size_a = a->shape[0] * a->shape[1];
+  //unsigned int size_a = a->shape[0] * a->shape[1];
   size_t buffer_size = size_a * sizeof(int);
 
   device_input_1 = clCreateBuffer(*context, CL_MEM_READ_ONLY, buffer_size, NULL, &err);
@@ -217,10 +231,10 @@ void callVectorAdd4Kernel(Matrix *a, Matrix *b, Matrix *c, Matrix *d, Matrix *ou
 
   //@@ define local and global work sizes
   // unsigned int size_a = 0; // @@ replace this with length of the input vector(s)
-  local_item_size = 64;
-  global_item_size = ((size_a + local_item_size - 1) / local_item_size) * local_item_size;
+  // local_item_size = 64;
+  // global_item_size = ((size_a + local_item_size - 1) / local_item_size) * local_item_size;
   // local_item_size = NULL; // let OpenCL decide
-  // global_item_size = size_a;
+  global_item_size = size_a;
 
   // Set the arguments to the kernel
   err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &device_input_1);
@@ -228,16 +242,16 @@ void callVectorAdd4Kernel(Matrix *a, Matrix *b, Matrix *c, Matrix *d, Matrix *ou
   err |= clSetKernelArg(kernel, 1, sizeof(cl_mem), &device_input_2);
   CHECK_ERR(err, "clSetKernelArg 1");
   err = clSetKernelArg(kernel, 2, sizeof(cl_mem), &device_input_3);
-  CHECK_ERR(err, "clSetKernelArg 0");
-  err |= clSetKernelArg(kernel, 3, sizeof(cl_mem), &device_input_4);
-  CHECK_ERR(err, "clSetKernelArg 1");
-  err |= clSetKernelArg(kernel, 4, sizeof(cl_mem), &device_output);
   CHECK_ERR(err, "clSetKernelArg 2");
-  err |= clSetKernelArg(kernel, 5, sizeof(unsigned int), &size_a);
+  err |= clSetKernelArg(kernel, 3, sizeof(cl_mem), &device_input_4);
   CHECK_ERR(err, "clSetKernelArg 3");
+  err |= clSetKernelArg(kernel, 4, sizeof(cl_mem), &device_output);
+  CHECK_ERR(err, "clSetKernelArg 4");
+  err |= clSetKernelArg(kernel, 5, sizeof(unsigned int), &size_a);
+  CHECK_ERR(err, "clSetKernelArg 5");
 
   //@@ Launch the GPU Kernel here
-  err = clEnqueueNDRangeKernel(*queue, kernel, 1, NULL, &global_item_size, &local_item_size, 0, NULL, NULL);
+  err = clEnqueueNDRangeKernel(*queue, kernel, 1, NULL, &global_item_size, NULL, 0, NULL, NULL);
   CHECK_ERR(err, "clEnqueueNDRangeKernel");
 
   //@@ Copy the GPU memory back to the CPU here
