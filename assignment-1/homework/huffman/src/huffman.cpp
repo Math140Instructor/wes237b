@@ -1,6 +1,7 @@
 #include "huffman.h"
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <map>
 #include <queue>
@@ -95,7 +96,8 @@ int huffman_encode(const unsigned char *bufin, unsigned int bufinlen, unsigned c
    * DEBUG
    */
   // cout << "\nHuffman Tree Codes:\n";
-  int leafCount = originalFrequencies.size();
+  unsigned int leafCount = static_cast<unsigned int>(originalFrequencies.size());
+
   //   if (leafCount == 1) {
   //     cout << originalFrequencies[0].letter << " = 0" << endl;
   //   } else {
@@ -129,7 +131,13 @@ int huffman_encode(const unsigned char *bufin, unsigned int bufinlen, unsigned c
                             leafCount * (sizeof(unsigned char) + sizeof(unsigned int)); // each entry
 
   *pbufoutlen = headerSize + encodedByteCount;
-  *pbufout = new unsigned char[*pbufoutlen]{};
+  //*pbufout = new unsigned char[*pbufoutlen]{};
+  *pbufout = static_cast<unsigned char *>(calloc(*pbufoutlen, sizeof(unsigned char)));
+
+  if (*pbufout == nullptr) {
+    *pbufoutlen = 0;
+    return -1;
+  }
 
   // Store original input length
   writeUint32(*pbufout, 0, bufinlen);
@@ -248,13 +256,45 @@ void writeUint32(unsigned char *buffer, unsigned int position, unsigned int valu
  **/
 int huffman_decode(const unsigned char *bufin, unsigned int bufinlen, unsigned char **pbufout, unsigned int *pbufoutlen) {
 
+  if (pbufout == nullptr || pbufoutlen == nullptr) {
+    return -1;
+  }
+
+  *pbufout = nullptr;
+  *pbufoutlen = 0;
+
+  if (bufin == nullptr || bufinlen == 0) {
+    return 0;
+  }
+
+  if (bufinlen < 8) {
+    return -1;
+  }
+
   unsigned int originalLength = readUint32(bufin, 0);                       // Number of bytes in the original uncompressed input. Example: "hello world" contains 11 characters at 1 byte each thus 11 bytes.
   unsigned int leafCount = readUint32(bufin, sizeof(unsigned int));         // histogram number of entries.
-  unsigned int inputPosition = sizeof(unsigned int) + sizeof(unsigned int); // start after reading the first two ints (8bytes offest hence 4+4)
+  unsigned int inputPosition = sizeof(unsigned int) + sizeof(unsigned int); // start after reading the first two ints (8-byte offset, hence 4 + 4)
+
+  // A byte-based Huffman tree can contain at most 256 unique symbols.
+  if (leafCount == 0 || leafCount > 256) {
+    return -1;
+  }
+
+  // Verify that the complete histogram header is present before reading it.
+  unsigned int headerSize = sizeof(unsigned int) + sizeof(unsigned int) + leafCount * (sizeof(unsigned char) + sizeof(unsigned int));
+
+  if (headerSize > bufinlen) {
+    return -1;
+  }
 
   *pbufoutlen = originalLength;
-  *pbufout = new unsigned char[originalLength]; // original string length
+  //*pbufout = new unsigned char[originalLength]; // original string length
+  *pbufout = static_cast<unsigned char *>(calloc(originalLength + 1, sizeof(unsigned char)));
 
+  if (*pbufout == nullptr) {
+    *pbufoutlen = 0;
+    return -1;
+  }
   // recreate Huffman tree
   // Need to read the histogram mapping
   vector<Node> frequencies;
@@ -297,6 +337,13 @@ int huffman_decode(const unsigned char *bufin, unsigned int bufinlen, unsigned c
     minHeap.push(parent);
   }
 
+  if (minHeap.empty()) {
+    free(*pbufout);
+    *pbufout = nullptr;
+    *pbufoutlen = 0;
+    return -1;
+  }
+
   int rootIndex = minHeap.top().index;
 
   // Handle only one unique symbol.
@@ -307,8 +354,7 @@ int huffman_decode(const unsigned char *bufin, unsigned int bufinlen, unsigned c
     return 0;
   }
 
-  // read tree to get code words with offset of the first two ints hence 4+4 then the total bytes from the histogram
-  unsigned int headerSize = sizeof(unsigned int) + sizeof(unsigned int) + leafCount * (sizeof(unsigned char) + sizeof(unsigned int));
+  // The encoded bitstream starts immediately after the header.
   unsigned int bitPosition = 0;
   unsigned int outputPosition = 0;
   int currentIndex = rootIndex;
@@ -323,6 +369,13 @@ int huffman_decode(const unsigned char *bufin, unsigned int bufinlen, unsigned c
     // Bits are read from the most significant bit to the least significant bit:
     // bit 7, 6, 5 =,..., 0.
     unsigned int bitIndex = 7 - (bitPosition % 8);
+    if (byteIndex >= bufinlen) {
+      free(*pbufout);
+      *pbufout = nullptr;
+      *pbufoutlen = 0;
+      return -1;
+    }
+
     // keep only that bit.
     unsigned char bit = (bufin[byteIndex] >> bitIndex) & 1;
 
@@ -334,6 +387,13 @@ int huffman_decode(const unsigned char *bufin, unsigned int bufinlen, unsigned c
 
     // Move to the next encoded bit.
     ++bitPosition;
+
+    if (currentIndex < 0 || static_cast<unsigned int>(currentIndex) >= frequencies.size()) {
+      free(*pbufout);
+      *pbufout = nullptr;
+      *pbufoutlen = 0;
+      return -1;
+    }
 
     const Node &node = frequencies[currentIndex];
 
