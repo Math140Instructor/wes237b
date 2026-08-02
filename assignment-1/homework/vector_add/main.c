@@ -57,7 +57,7 @@ void callVectorAdd2Kernel(Matrix *a, Matrix *b, Matrix *out, cl_context *context
   cl_kernel kernel;   // kernel
 
   // OpenCL setup variables
-  size_t global_item_size = 0; //, local_item_size = 4;
+  size_t global_item_size = 0, local_item_size = 1;
 
   cl_int err;
 
@@ -81,7 +81,7 @@ void callVectorAdd2Kernel(Matrix *a, Matrix *b, Matrix *out, cl_context *context
   // Allocate GPU memory
   //@@ Create memory buffers for input and output vectors
 
-  //unsigned int size_a = a->shape[0] * a->shape[1];
+  // unsigned int size_a = a->shape[0] * a->shape[1];
   size_t buffer_size = size_a * sizeof(int);
 
   device_input_1 = clCreateBuffer(*context, CL_MEM_READ_ONLY, buffer_size, NULL, &err);
@@ -116,7 +116,7 @@ void callVectorAdd2Kernel(Matrix *a, Matrix *b, Matrix *out, cl_context *context
   CHECK_ERR(err, "clSetKernelArg 3");
 
   //@@ Launch the GPU Kernel here
-  err = clEnqueueNDRangeKernel(*queue, kernel, 1, NULL, &global_item_size, NULL, 0, NULL, NULL);
+  err = clEnqueueNDRangeKernel(*queue, kernel, 1, NULL, &global_item_size, &local_item_size, 0, NULL, NULL);
   CHECK_ERR(err, "clEnqueueNDRangeKernel");
 
   //@@ Copy the GPU memory back to the CPU here
@@ -179,7 +179,7 @@ void callVectorAdd4Kernel(Matrix *a, Matrix *b, Matrix *c, Matrix *d, Matrix *ou
   cl_kernel kernel;   // kernel
 
   // OpenCL setup variables
-  size_t global_item_size = 0; // = 4;
+  size_t global_item_size = 0, local_item_size = 1;
   cl_int err;
 
   // Device input and output vectors
@@ -202,7 +202,7 @@ void callVectorAdd4Kernel(Matrix *a, Matrix *b, Matrix *c, Matrix *d, Matrix *ou
   // assume same size to save me some time :)
   // Allocate GPU memory
   //@@ Create memory buffers for input and output vectors
-  //unsigned int size_a = a->shape[0] * a->shape[1];
+  // unsigned int size_a = a->shape[0] * a->shape[1];
   size_t buffer_size = size_a * sizeof(int);
 
   device_input_1 = clCreateBuffer(*context, CL_MEM_READ_ONLY, buffer_size, NULL, &err);
@@ -226,6 +226,7 @@ void callVectorAdd4Kernel(Matrix *a, Matrix *b, Matrix *c, Matrix *d, Matrix *ou
 
   err = clEnqueueWriteBuffer(*queue, device_input_3, CL_TRUE, 0, buffer_size, c->data, 0, NULL, NULL);
   CHECK_ERR(err, "clEnqueueWriteBuffer input 3");
+  
   err = clEnqueueWriteBuffer(*queue, device_input_4, CL_TRUE, 0, buffer_size, d->data, 0, NULL, NULL);
   CHECK_ERR(err, "clEnqueueWriteBuffer input 4");
 
@@ -251,7 +252,7 @@ void callVectorAdd4Kernel(Matrix *a, Matrix *b, Matrix *c, Matrix *d, Matrix *ou
   CHECK_ERR(err, "clSetKernelArg 5");
 
   //@@ Launch the GPU Kernel here
-  err = clEnqueueNDRangeKernel(*queue, kernel, 1, NULL, &global_item_size, NULL, 0, NULL, NULL);
+  err = clEnqueueNDRangeKernel(*queue, kernel, 1, NULL, &global_item_size, &local_item_size, 0, NULL, NULL);
   CHECK_ERR(err, "clEnqueueNDRangeKernel");
 
   //@@ Copy the GPU memory back to the CPU here

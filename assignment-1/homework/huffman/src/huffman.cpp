@@ -1,5 +1,4 @@
 #include "huffman.h"
-#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
