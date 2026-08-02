@@ -20,9 +20,8 @@ struct Node {
 struct CompareNode {
   bool operator()(const Node &left, const Node &right) const {
     if (left.freq == right.freq) {
-      return left.index < right.index;
+      return left.index > right.index;
     }
-
     return left.freq > right.freq;
   }
 };
