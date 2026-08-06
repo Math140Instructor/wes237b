@@ -39,7 +39,7 @@ int main(int argc, char *argv[])
 
     output.shape[0] = 1;
     output.shape[1] = 1;
-    output.data = (int*)malloc(sizeof(int) * rows * cols);
+    output.data = (int*)malloc(sizeof(int) * rows * cols); //3x3 => 1x9
 
     // Sum all elements of the array
     //@@ Modify the below code in the remaining demos

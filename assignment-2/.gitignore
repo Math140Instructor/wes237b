@@ -168,7 +168,7 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/c,c++,windows,macos,linux,visualstudiocode
-
+.vscode/**
 solution
 output.raw
 !lab/Dataset/**/output.raw
