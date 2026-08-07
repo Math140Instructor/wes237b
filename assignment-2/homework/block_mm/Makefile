@@ -32,6 +32,7 @@ run: solution
 	./solution Dataset/7/input0.raw Dataset/7/input1.raw Dataset/7/output.raw output.raw
 	./solution Dataset/8/input0.raw Dataset/8/input1.raw Dataset/8/output.raw output.raw
 	./solution Dataset/9/input0.raw Dataset/9/input1.raw Dataset/9/output.raw output.raw
+	./solution Dataset/10/input0.raw Dataset/10/input1.raw Dataset/10/output.raw output.raw
 
 benchmark: solution
 	time ./solution Dataset/0/input0.raw Dataset/0/input1.raw Dataset/0/output.raw output.raw
@@ -44,6 +45,7 @@ benchmark: solution
 	time ./solution Dataset/7/input0.raw Dataset/7/input1.raw Dataset/7/output.raw output.raw
 	time ./solution Dataset/8/input0.raw Dataset/8/input1.raw Dataset/8/output.raw output.raw
 	time ./solution Dataset/9/input0.raw Dataset/9/input1.raw Dataset/9/output.raw output.raw
+	time ./solution Dataset/10/input0.raw Dataset/10/input1.raw Dataset/10/output.raw output.raw
 
 clean: 
 	rm -f solution

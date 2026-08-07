@@ -9,26 +9,68 @@
     exit(EXIT_FAILURE);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                \
   }
 
-void NaiveMatrixMultiply(Matrix *input0, Matrix *input1, Matrix *result) {
-  // NxP PxM
-  // NxM
-  // [1 2 3] [7 8]
-  // [4 5 6] [9 10]
-  //         [11 12]
-  // 2x3 3x2 = 2x2
-  //@@ Insert code to implement naive matrix multiply here
-  int N = input0->shape[0], P = input0->shape[1], PP = input1->shape[0], M = input1->shape[1];
+#define BLOCK_SIZE 32
+
+/**
+ * 32x32 block sizes
+ */
+void BlockMatrixMultiplyUnrolled(Matrix *input0, Matrix *input1, Matrix *result) {
+  // input0: N x P
+  // input1: P x M
+  // result: N x M
+  int N = input0->shape[0];
+  int P = input0->shape[1];
+  int PP = input1->shape[0];
+  int M = input1->shape[1];
+
   if (P != PP) {
     return;
   }
 
+  // Initialize result matrix
   for (int r = 0; r < N; ++r) {
     for (int col = 0; col < M; ++col) {
-      int sum = 0;
-      for (int p = 0; p < P; ++p) {
-        sum += input0->data[r * P + p] * input1->data[p * M + col];
+      result->data[r * M + col] = 0;
+    }
+  }
+
+  /* Move through the matrices one block at a time*/
+
+  for (int rBlock = 0; rBlock < N; rBlock += BLOCK_SIZE) { // partition row into block chunks
+    int rEnd = rBlock + BLOCK_SIZE;
+    if (rEnd > N) {
+      rEnd = N;
+    }
+
+    for (int colBlock = 0; colBlock < M; colBlock += BLOCK_SIZE) { // partition column into block chunks
+      int colEnd = colBlock + BLOCK_SIZE;
+      if (colEnd > M) {
+        colEnd = M;
       }
-      result->data[r * M + col] = sum;
+
+      for (int pBlock = 0; pBlock < P; pBlock += BLOCK_SIZE) {
+        int pEnd = pBlock + BLOCK_SIZE;
+        if (pEnd > P) {
+          pEnd = P;
+        }
+
+        // Multiply the current blocks
+        for (int r = rBlock; r < rEnd; ++r) {
+          for (int p = pBlock; p < pEnd; ++p) {
+            int aValue = input0->data[r * P + p];
+            for (int col = colBlock; col < colEnd; col += 4) {
+              if (col < colEnd)
+                result->data[r * M + col] += aValue * input1->data[p * M + col];
+              if (col + 1 < colEnd)
+                result->data[r * M + col + 1] += aValue * input1->data[p * M + col + 1];
+              if (col + 2 < colEnd)
+                result->data[r * M + col + 2] += aValue * input1->data[p * M + col + 2];
+              if (col + 3 < colEnd)
+                result->data[r * M + col + 3] += aValue * input1->data[p * M + col + 3];
+            }
+          }
+        }
+      }
     }
   }
 }
@@ -67,7 +109,7 @@ int main(int argc, char *argv[]) {
   host_c.data = (int *)malloc(sizeof(int) * host_c.shape[0] * host_c.shape[1]);
 
   // Call your matrix multiply.
-  NaiveMatrixMultiply(&host_a, &host_b, &host_c);
+  BlockMatrixMultiplyUnrolled(&host_a, &host_b, &host_c);
 
   // // Call to print the matrix
   // PrintMatrix(&host_c);
