@@ -9,7 +9,7 @@
     exit(EXIT_FAILURE);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                \
   }
 
-#define BLOCK_SIZE 32
+#define BLOCK_SIZE 1024
 
 /**
  * 32x32 block sizes
