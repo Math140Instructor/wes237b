@@ -54,3 +54,6 @@ dkms.conf
 # debug information files
 *.dwo
 .DS_Store
+assignment*/lab/**/Dataset
+assignment*/homework/**/Dataset
+assignment*/homework/**/Dataset
