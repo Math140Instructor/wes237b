@@ -30,6 +30,11 @@ int main(int argc, char *argv[]) {
   err = LoadMatrix(input_file_b, &host_b);
   CHECK_ERR(err, "LoadMatrix");
 
+  // A: NxP
+  // B: PxM
+  if (host_a.shape[1] != host_b.shape[0])
+    return -2;
+
   int rows, cols;
   rows = host_a.shape[0];
   cols = host_b.shape[1];
@@ -40,18 +45,18 @@ int main(int argc, char *argv[]) {
 
   // Sum all elements of the array
   //@@ Modify the below code in the remaining demos
-  int sum = 0;
+  int sum = 0, sum0 = 0, sum1 = 0, sum2 = 0, sum3 = 0;
   int arr = rows * cols;
-
-  for (int i = 0; i < arr; i += 4) {
-    if (i < arr)
-      sum += host_a.data[i];
-    if (i + 1 < arr)
-      sum += host_a.data[i + 1];
-    if (i + 2 < arr)
-      sum += host_a.data[i + 2];
-    if (i + 3 < arr)
-      sum += host_a.data[i + 3];
+  int i = 0;
+  for (i = 0; i + 3 < arr; i += 4) {
+    sum0 += host_a.data[i];
+    sum1 += host_a.data[i + 1];
+    sum2 += host_a.data[i + 2];
+    sum3 += host_a.data[i + 3];
+  }
+  sum = sum0 + sum1 + sum2 + sum3;
+  for (; i < arr; ++i) {
+    sum += host_a.data[i];
   }
 
   printf("sum: %d == %d\n", sum, host_b.data[0]);

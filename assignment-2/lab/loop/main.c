@@ -3,64 +3,65 @@
 
 #include "matrix.h"
 
-#define CHECK_ERR(err, msg)                           \
-    if (err != CL_SUCCESS)                            \
-    {                                                 \
-        fprintf(stderr, "%s failed: %d\n", msg, err); \
-        exit(EXIT_FAILURE);                           \
-    }
+#define CHECK_ERR(err, msg)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            \
+  if (err != CL_SUCCESS) {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             \
+    fprintf(stderr, "%s failed: %d\n", msg, err);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      \
+    exit(EXIT_FAILURE);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                \
+  }
 
-int main(int argc, char *argv[])
-{
-    if (argc != 4)
-    {
-        fprintf(stderr, "Usage: %s <input_file_0> <answer_file> <output_file>\n", argv[0]);
-        return -1;
-    }
-    
-    const char *input_file_a = argv[1];
-    const char *input_file_b = argv[2];
-    const char *output_file = argv[3];
+int main(int argc, char *argv[]) {
+  if (argc != 4) {
+    fprintf(stderr, "Usage: %s <input_file_0> <answer_file> <output_file>\n", argv[0]);
+    return -1;
+  }
 
-    // Host input and output vectors and sizes
-    Matrix host_a, host_b, output;
+  const char *input_file_a = argv[1];
+  const char *input_file_b = argv[2];
+  const char *output_file = argv[3];
 
-    cl_int err;
+  // Host input and output vectors and sizes
+  Matrix host_a, host_b, output;
 
-    err = LoadMatrix(input_file_a, &host_a);
-    CHECK_ERR(err, "LoadMatrix");
+  cl_int err;
 
-    err = LoadMatrix(input_file_b, &host_b);
-    CHECK_ERR(err, "LoadMatrix");
+  err = LoadMatrix(input_file_a, &host_a);
+  CHECK_ERR(err, "LoadMatrix");
 
-    int rows, cols;
-    rows = host_a.shape[0];
-    cols = host_b.shape[1];
+  err = LoadMatrix(input_file_b, &host_b);
+  CHECK_ERR(err, "LoadMatrix");
 
-    output.shape[0] = 1;
-    output.shape[1] = 1;
-    output.data = (int*)malloc(sizeof(int) * rows * cols); //3x3 => 1x9
+  // A: NxP
+  // B: PxM
+  if (host_a.shape[1] != host_b.shape[0])
+    return -2;
 
-    // Sum all elements of the array
-    //@@ Modify the below code in the remaining demos
-    int sum = 0;
+  int rows, cols;
+  rows = host_a.shape[0];
+  cols = host_b.shape[1];
 
-    for (int i = 0; i < rows * cols; i++)
-    {
-        sum += host_a.data[i];
-    }
+  output.shape[0] = 1;
+  output.shape[1] = 1;
+  output.data = (int *)malloc(sizeof(int) * rows * cols); // 3x3 => 1x9
 
-    printf("sum: %d == %d\n", sum, host_b.data[0]);
+  // Sum all elements of the array
+  //@@ Modify the below code in the remaining demos
+  int sum = 0;
 
-    output.data[0] = sum;
-    err = CheckMatrix(&host_b, &output);
-    CHECK_ERR(err, "CheckMatrix");
-    SaveMatrix(output_file, &output);
+  for (int i = 0; i < rows * cols; i++) {
+    sum += host_a.data[i];
+  }
 
-    // Release host memory
-    free(host_a.data);
-    free(host_b.data);
-    free(output.data);
+  printf("sum: %d == %d\n", sum, host_b.data[0]);
 
-    return 0;
+  output.data[0] = sum;
+  err = CheckMatrix(&host_b, &output);
+  CHECK_ERR(err, "CheckMatrix");
+  SaveMatrix(output_file, &output);
+
+  // Release host memory
+  free(host_a.data);
+  free(host_b.data);
+  free(output.data);
+
+  return 0;
 }
