@@ -58,15 +58,17 @@ void BlockMatrixMultiplyUnrolled(Matrix *input0, Matrix *input1, Matrix *result)
         for (int r = rBlock; r < rEnd; ++r) {
           for (int p = pBlock; p < pEnd; ++p) {
             int aValue = input0->data[r * P + p];
-            for (int col = colBlock; col < colEnd; col += 4) {
-              if (col < colEnd)
-                result->data[r * M + col] += aValue * input1->data[p * M + col];
-              if (col + 1 < colEnd)
-                result->data[r * M + col + 1] += aValue * input1->data[p * M + col + 1];
-              if (col + 2 < colEnd)
-                result->data[r * M + col + 2] += aValue * input1->data[p * M + col + 2];
-              if (col + 3 < colEnd)
-                result->data[r * M + col + 3] += aValue * input1->data[p * M + col + 3];
+
+            int col = colBlock;
+            for (; col + 3 < colEnd; col += 4) {
+              result->data[r * M + col] += aValue * input1->data[p * M + col];
+              result->data[r * M + col + 1] += aValue * input1->data[p * M + col + 1];
+              result->data[r * M + col + 2] += aValue * input1->data[p * M + col + 2];
+              result->data[r * M + col + 3] += aValue * input1->data[p * M + col + 3];
+            }
+            // calculate the remainder
+            for (; col < colEnd; ++col) {
+              result->data[r * M + col] += aValue * input1->data[p * M + col];
             }
           }
         }
