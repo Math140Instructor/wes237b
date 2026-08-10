@@ -48,7 +48,7 @@ int main(int argc, char *argv[]) {
   int sum = 0, sum0 = 0, sum1 = 0, sum2 = 0, sum3 = 0;
   int arr = rows * cols;
   int i = 0;
-  for (i = 0; i + 3 < arr; i += 4) {
+  for (; i + 3 < arr; i += 4) {
     sum0 += host_a.data[i];
     sum1 += host_a.data[i + 1];
     sum2 += host_a.data[i + 2];
