@@ -2,6 +2,7 @@
 #include <stdlib.h>
 
 #include "matrix.h"
+#include <arm_neon.h>
 
 #define CHECK_ERR(err, msg)                           \
     if (err != CL_SUCCESS)                            \
