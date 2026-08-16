@@ -4,64 +4,71 @@
 #include "matrix.h"
 #include <arm_neon.h>
 
-#define CHECK_ERR(err, msg)                           \
-    if (err != CL_SUCCESS)                            \
-    {                                                 \
-        fprintf(stderr, "%s failed: %d\n", msg, err); \
-        exit(EXIT_FAILURE);                           \
-    }
+#define CHECK_ERR(err, msg)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            \
+  if (err != CL_SUCCESS) {                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             \
+    fprintf(stderr, "%s failed: %d\n", msg, err);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      \
+    exit(EXIT_FAILURE);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                \
+  }
 
-int main(int argc, char *argv[])
-{
-    if (argc != 4)
-    {
-        fprintf(stderr, "Usage: %s <input_file_0> <answer_file> <output_file>\n", argv[0]);
-        return -1;
-    }
-    
-    const char *input_file_a = argv[1];
-    const char *input_file_b = argv[2];
-    const char *output_file = argv[3];
+int main(int argc, char *argv[]) {
+  if (argc != 4) {
+    fprintf(stderr, "Usage: %s <input_file_0> <answer_file> <output_file>\n", argv[0]);
+    return -1;
+  }
 
-    // Host input and output vectors and sizes
-    Matrix host_a, host_b, output;
+  const char *input_file_a = argv[1];
+  const char *input_file_b = argv[2];
+  const char *output_file = argv[3];
 
-    cl_int err;
+  // Host input and output vectors and sizes
+  Matrix host_a, host_b, output;
 
-    err = LoadMatrix(input_file_a, &host_a);
-    CHECK_ERR(err, "LoadMatrix");
+  cl_int err;
 
-    err = LoadMatrix(input_file_b, &host_b);
-    CHECK_ERR(err, "LoadMatrix");
+  err = LoadMatrix(input_file_a, &host_a);
+  CHECK_ERR(err, "LoadMatrix");
 
-    int rows, cols;
-    rows = host_a.shape[0];
-    cols = host_b.shape[1];
+  err = LoadMatrix(input_file_b, &host_b);
+  CHECK_ERR(err, "LoadMatrix");
 
-    output.shape[0] = 1;
-    output.shape[1] = 1;
-    output.data = (int*)malloc(sizeof(int) * rows * cols);
+  int rows, cols;
+  rows = host_a.shape[0]; // NxP
+  cols = host_b.shape[1]; // PXM
 
-    // Sum all elements of the array
-    //@@ Replace this loop with ARM Neon intrinsics
-    int sum = 0;
+  output.shape[0] = 1;
+  output.shape[1] = 1;
+  output.data = (int *)malloc(sizeof(int) * rows * cols);
 
-    for (int i = 0; i < rows * cols; i++)
-    {
-        sum += host_a.data[i];
-    }
+  // Sum all elements of the array
+  //@@ Replace this loop with ARM Neon intrinsics
+  int elementCount = rows * cols;
+  //int vectorEnd = elementCount - (elementCount % 4);
+  int sum = 0;
+  int i = 0;
 
-    printf("sum: %d == %d\n", sum, host_b.data[0]);
+  // Process four integers per iteration
+  for (; i + 4 < elementCount; i += 4) {
+    // Load 4 32 bit integers into a 128bit NEON vector
+    int32x4_t values = vld1q_s32(&host_a.data[i]);
+    sum += vaddvq_s32(values);
+  }
 
-    output.data[0] = sum;
-    err = CheckMatrix(&host_b, &output);
-    CHECK_ERR(err, "CheckMatrix");
-    SaveMatrix(output_file, &output);
+  // Process the remaining integers
+  for (; i < elementCount; ++i) {
+    sum += host_a.data[i];
+  }
 
-    // Release host memory
-    free(host_a.data);
-    free(host_b.data);
-    free(output.data);
+  printf("sum: %d == %d\n", sum, host_b.data[0]);
 
-    return 0;
+  output.data[0] = sum;
+  err = CheckMatrix(&host_b, &output);
+  CHECK_ERR(err, "CheckMatrix");
+  SaveMatrix(output_file, &output);
+
+  // Release host memory
+  free(host_a.data);
+  free(host_b.data);
+  free(output.data);
+
+  return 0;
 }
