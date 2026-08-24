@@ -1,8 +1,11 @@
 {
 	"image": "ghcr.io/kastnerrg/cse160-opencl:qcomm",
 	"runArgs": [
-		"--device=/dev/kgsl-3d0"
+		"--device=/dev/kgsl-3d0",
+		"--device=/dev/video32",
+		"--device=/dev/video33"
 	],
+	"remoteUser": "root",
 	"customizations": {
 		"vscode": {
 			"extensions": [
