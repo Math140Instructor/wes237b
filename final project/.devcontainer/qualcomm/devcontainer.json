@@ -1,17 +1,21 @@
 {
-	"image": "ghcr.io/kastnerrg/cse160-opencl:qcomm",
-	"runArgs": [
-		"--device=/dev/kgsl-3d0",
-		"--device=/dev/video32",
-		"--device=/dev/video33"
-	],
-	"remoteUser": "root",
-	"customizations": {
-		"vscode": {
-			"extensions": [
-				"VisualStudioExptTeam.vscodeintellicode",
-				"ms-vscode.cpptools-extension-pack"
-			]
-		}
-	}
+    "image": "ghcr.io/kastnerrg/cse160-opencl:qcomm",
+
+    "runArgs": [
+        "--privileged",
+        "--device=/dev/kgsl-3d0"
+    ],
+
+    "postCreateCommand": "apt update && apt install -y build-essential pkg-config libopencv-dev opencv-data v4l-utils ocl-icd-libopencl1 ocl-icd-opencl-dev clinfo",
+
+    "remoteUser": "root",
+
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "VisualStudioExptTeam.vscodeintellicode",
+                "ms-vscode.cpptools-extension-pack"
+            ]
+        }
+    }
 }
