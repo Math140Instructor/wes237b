@@ -1,0 +1,13 @@
+{
+	"image": "ghcr.io/kastnerrg/cse160-opencl:gpu-intel",
+	"runArgs": [
+		"--device", "/dev/dri"
+	],
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-vscode.cpptools-extension-pack"
+			]
+		}
+	}
+}
