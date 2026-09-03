@@ -2,6 +2,7 @@ CC       = gcc
 CFLAGS   = -g -Wall
 INCFLAGS := -I../../helper_lib
 LDFLAGS  := ../../helper_lib/helper_lib.a -lm
+SHELL := /bin/bash
 
 ifeq ($(shell uname -o), Darwin)
 	LDFLAGS += -framework OpenCL
@@ -31,7 +32,19 @@ run: solution
 	./solution Dataset/7/input0.raw Dataset/7/output.raw output.raw
 	./solution Dataset/8/input0.raw Dataset/8/output.raw output.raw
 	./solution Dataset/9/input0.raw Dataset/9/output.raw output.raw
-	
+
+benchmark: solution
+	time ./solution Dataset/0/input0.raw Dataset/0/output.raw output.raw
+	time ./solution Dataset/1/input0.raw Dataset/1/output.raw output.raw
+	time ./solution Dataset/2/input0.raw Dataset/2/output.raw output.raw
+	time ./solution Dataset/3/input0.raw Dataset/3/output.raw output.raw
+	time ./solution Dataset/4/input0.raw Dataset/4/output.raw output.raw
+	time ./solution Dataset/5/input0.raw Dataset/5/output.raw output.raw
+	time ./solution Dataset/6/input0.raw Dataset/6/output.raw output.raw
+	time ./solution Dataset/7/input0.raw Dataset/7/output.raw output.raw
+	time ./solution Dataset/8/input0.raw Dataset/8/output.raw output.raw
+	time ./solution Dataset/9/input0.raw Dataset/9/output.raw output.raw
+
 clean: 
 	rm -f solution
 	cd ../../helper_lib; make clean
