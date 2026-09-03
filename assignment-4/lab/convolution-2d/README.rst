@@ -1,7 +1,7 @@
 Convolution
 =================
 
-.. figure:: /image/2D_Convolution_Animation.gif
+.. figure:: ../../image/2D_Convolution_Animation.gif
     :align: center
     :alt: 2D Convolution GIF
 *Credit: Wikipedia*
@@ -15,7 +15,7 @@ The lab's objective is to implement a tiled image convolution with some optimiza
 
 Convolution is used in many fields, such as image processing for image filtering. A standard image convolution formula for a 5x5 convolution filter :code:`M` with an Image :code:`I` is:
 
-.. figure:: /image/convolution_formula.png
+.. figure:: ../../image/convolution_formula.png
     :align: center
     :alt: Convolution Formula
 
@@ -112,6 +112,6 @@ Describe how you implemented the convolution operation, any optimizations you ma
 .. ^^^^^^^^^^^^^^^
 .. After you understand how convolution works, I would recommend starting by implementing the embarrassingly parallel portion of convolution. Make sure the naive implementation works before going forward and attempting to incoporate shared memory. It will be extremely difficult to debug your shared memory portion if your basic convolution does not work. In terms of complexity, strategy 3 is the easiest and strategy 1 is the hardest.
 
-.. .. figure:: /image/TilingStrategies.png
+.. .. figure:: ../../image/TilingStrategies.png
 ..     :align: center
 ..     :alt: Tiling Strategies
