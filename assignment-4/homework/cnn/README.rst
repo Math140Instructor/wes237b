@@ -23,7 +23,7 @@ Copy the elements of the input :math:`x` with shape :math:`(B, C, H, W)` to :mat
   - this is flattened in channel major order
   - each channel is then flattened in row-major order
 
-.. image:: /image/unroll_diagram.excalidraw.png
+.. image:: ../../image/unroll_diagram.excalidraw.png
 
 Partial pseudocode is given below:
 ::
