@@ -1,5 +1,8 @@
 {
     "image": "ghcr.io/kastnerrg/cse160-opencl:qcomm",
+
+    "initializeCommand": "sudo mkdir -p /run/cam_server",
+
     "runArgs": [
         "--privileged",
         "--ipc=host",
@@ -7,13 +10,17 @@
         "--network=host",
         "--device=/dev/kgsl-3d0"
     ],
+
     "mounts": [
         "source=/run/cam_server,target=/run/cam_server,type=bind"
     ],
+
     "containerEnv": {
         "GST_PLUGIN_PATH": "/usr/lib/aarch64-linux-gnu/gstreamer-1.0",
         "GST_REGISTRY": "/tmp/gstreamer-registry.bin"
     },
-    "postCreateCommand": "apt-get update && apt-get install -y qcom-camx libqmmf1 gstreamer1.0-plugins-qcom-qmmfsrc gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly libopencv-dev opencv-data build-essential pkg-config v4l-utils && echo '/usr/lib/qcm6490' > /etc/ld.so.conf.d/qcom-camera.conf && ldconfig && rm -f /tmp/gstreamer-registry.bin",
+
+    "postCreateCommand": "apt-get update && apt-get install -y qcom-camera-server qcom-camx libqmmf1 gstreamer1.0-tools gstreamer1.0-plugins-qcom-qmmfsrc gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly libopencv-dev opencv-data build-essential pkg-config v4l-utils && echo '/usr/lib/qcm6490' > /etc/ld.so.conf.d/qcom-camera.conf && ldconfig && rm -f /tmp/gstreamer-registry.bin",
+
     "remoteUser": "root"
 }
