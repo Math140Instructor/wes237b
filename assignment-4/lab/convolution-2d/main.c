@@ -126,8 +126,12 @@ void OpenCLConvolution2D(Image *input0, Matrix *input1, Image *result, int strid
   err |= clSetKernelArg(kernel, 7, sizeof(unsigned int), &stride);
   CHECK_ERR(err, "clSetKernelArg 7");
 
-  size_t globalWorkSize[3] = {(size_t)outputWidth, (size_t)outputHeight, (size_t)channels};
+  // size_t globalWorkSize[3] = {(size_t)outputWidth, (size_t)outputHeight, (size_t)channels};
+  // size_t localWorkSize[3] = {8, 8, 1};
+
   size_t localWorkSize[3] = {8, 8, 1};
+  size_t globalWorkSize[3] = {((outputWidth + localWorkSize[0] - 1) / localWorkSize[0]) * localWorkSize[0], ((outputHeight + localWorkSize[1] - 1) / localWorkSize[1]) * localWorkSize[1], ((channels + localWorkSize[2] - 1) / localWorkSize[2]) * localWorkSize[2]};
+  
   err = clEnqueueNDRangeKernel(queue, kernel, 3, NULL, globalWorkSize, localWorkSize, 0, NULL, NULL);
   CHECK_ERR(err, "clEnqueueNDRangeKernel");
 
@@ -144,19 +148,6 @@ void OpenCLConvolution2D(Image *input0, Matrix *input1, Image *result, int strid
   clReleaseContext(context);
 
   free(kernel_source);
-
-  // Compute the output dim
-  // @@ define local and global work sizes
-  // Execute the OpenCL kernel on the list
-
-  //@@ Launch the GPU Kernel here
-  // Execute the OpenCL kernel on the array
-
-  //@@ Copy the GPU memory back to the CPU here
-  // Read the memory buffer output_mem_obj to the local variable result
-
-  //@@ Free the GPU memory here
-  // Release OpenCL resources
 }
 
 int main(int argc, char *argv[]) {
