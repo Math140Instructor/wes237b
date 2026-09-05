@@ -22,9 +22,7 @@ void OpenCLInterface::conv_forward_gemm_opencl_prolog(const float *host_y, const
 
   // Number of elements in each buffer
   const size_t x_size = (size_t)B * C * H * W;
-
   const size_t k_size = (size_t)M * C * K * K;
-
   const size_t y_size = (size_t)B * M * H_out * W_out;
 
   const size_t x_unroll_size = (size_t)B * C * K * K * H_out * W_out;
@@ -34,29 +32,23 @@ void OpenCLInterface::conv_forward_gemm_opencl_prolog(const float *host_y, const
   //@@ Allocate GPU memory here (don't forget batch sizes!)
 
   *device_x = clCreateBuffer(opencl->context, CL_MEM_READ_ONLY, x_size * sizeof(float), NULL, &err);
-
   CHECK_ERR(err, "clCreateBuffer device_x");
 
   *device_k = clCreateBuffer(opencl->context, CL_MEM_READ_ONLY, k_size * sizeof(float), NULL, &err);
-
   CHECK_ERR(err, "clCreateBuffer device_k");
 
   *device_x_unroll = clCreateBuffer(opencl->context, CL_MEM_READ_WRITE, x_unroll_size * sizeof(float), NULL, &err);
-
   CHECK_ERR(err, "clCreateBuffer device_x_unroll");
 
   *device_y = clCreateBuffer(opencl->context, CL_MEM_READ_WRITE, y_size * sizeof(float), NULL, &err);
-
   CHECK_ERR(err, "clCreateBuffer device_y");
 
   //@@ Copy memory to the GPU here
 
   err = clEnqueueWriteBuffer(opencl->queue, *device_x, CL_TRUE, 0, x_size * sizeof(float), host_x, 0, NULL, NULL);
-
   CHECK_ERR(err, "clEnqueueWriteBuffer device_x");
 
   err = clEnqueueWriteBuffer(opencl->queue, *device_k, CL_TRUE, 0, k_size * sizeof(float), host_k, 0, NULL, NULL);
-
   CHECK_ERR(err, "clEnqueueWriteBuffer device_k");
 }
 
@@ -73,49 +65,38 @@ void OpenCLInterface::conv_forward_gemm_opencl(cl_mem device_y, const cl_mem dev
 
   // Set im2col arguments
   err = clSetKernelArg(opencl->im2col_kernel, 0, sizeof(cl_mem), &device_x_unroll);
-
   CHECK_ERR(err, "clSetKernelArg 0");
 
   err = clSetKernelArg(opencl->im2col_kernel, 1, sizeof(cl_mem), &device_x);
-
   CHECK_ERR(err, "clSetKernelArg 1");
 
   err = clSetKernelArg(opencl->im2col_kernel, 2, sizeof(int), &B);
-
   CHECK_ERR(err, "clSetKernelArg 2");
 
   err = clSetKernelArg(opencl->im2col_kernel, 3, sizeof(int), &C);
-
   CHECK_ERR(err, "clSetKernelArg 3");
 
   err = clSetKernelArg(opencl->im2col_kernel, 4, sizeof(int), &H);
-
   CHECK_ERR(err, "clSetKernelArg 4");
 
   err = clSetKernelArg(opencl->im2col_kernel, 5, sizeof(int), &W);
-
   CHECK_ERR(err, "clSetKernelArg 5");
 
   err = clSetKernelArg(opencl->im2col_kernel, 6, sizeof(int), &K);
-
   CHECK_ERR(err, "clSetKernelArg 6");
 
   // @@ define local and global work sizes
-
   const size_t tile = 16;
 
   size_t localWorkSize[3] = {tile, tile, 1};
-
   size_t globalWorkSize[3] = {((W_unroll + tile - 1) / tile) * tile, ((H_unroll + tile - 1) / tile) * tile, (size_t)B};
 
   //@@ Launch the im2col kernel here
 
   err = clEnqueueNDRangeKernel(opencl->queue, opencl->im2col_kernel, 3, NULL, globalWorkSize, localWorkSize, 0, NULL, NULL);
-
   CHECK_ERR(err, "clEnqueueNDRangeKernel im2col");
 
   //@@ ====== End im2col =====
-
   //@@ ====== Start gemm =====
 
   /*
