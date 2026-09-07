@@ -108,30 +108,34 @@ void OpenCLConvolution2D(Image *input0, Matrix *input1, Image *result, int strid
   // int width, int height, int maskWidth,  int imageChannels
   err = clSetKernelArg(kernel, 0, sizeof(cl_mem), &device_input);
   CHECK_ERR(err, "clSetKernelArg 0");
-  err |= clSetKernelArg(kernel, 1, sizeof(cl_mem), &device_output);
+  err = clSetKernelArg(kernel, 1, sizeof(cl_mem), &device_output);
   CHECK_ERR(err, "clSetKernelArg 1");
-  err |= clSetKernelArg(kernel, 2, sizeof(cl_mem), &device_mask);
+  err = clSetKernelArg(kernel, 2, sizeof(cl_mem), &device_mask);
   CHECK_ERR(err, "clSetKernelArg 2");
 
-  err |= clSetKernelArg(kernel, 3, sizeof(unsigned int), &width);
+  err = clSetKernelArg(kernel, 3, sizeof(unsigned int), &width);
   CHECK_ERR(err, "clSetKernelArg 3");
-  err |= clSetKernelArg(kernel, 4, sizeof(unsigned int), &height);
+  err = clSetKernelArg(kernel, 4, sizeof(unsigned int), &height);
   CHECK_ERR(err, "clSetKernelArg 4");
-  err |= clSetKernelArg(kernel, 5, sizeof(unsigned int), &maskWidth);
+  err = clSetKernelArg(kernel, 5, sizeof(unsigned int), &maskWidth);
   CHECK_ERR(err, "clSetKernelArg 5");
 
   int imageChannels = IMAGE_CHANNELS;
-  err |= clSetKernelArg(kernel, 6, sizeof(unsigned int), &imageChannels);
+  err = clSetKernelArg(kernel, 6, sizeof(unsigned int), &imageChannels);
   CHECK_ERR(err, "clSetKernelArg 6");
-  err |= clSetKernelArg(kernel, 7, sizeof(unsigned int), &stride);
+  err = clSetKernelArg(kernel, 7, sizeof(unsigned int), &stride);
   CHECK_ERR(err, "clSetKernelArg 7");
 
-  // size_t globalWorkSize[3] = {(size_t)outputWidth, (size_t)outputHeight, (size_t)channels};
-  // size_t localWorkSize[3] = {8, 8, 1};
-
-  size_t localWorkSize[3] = {4, 4, 1};
+  int localworksize = 32;
+  size_t localWorkSize[3] = {localworksize, localworksize, 1};
   size_t globalWorkSize[3] = {((outputWidth + localWorkSize[0] - 1) / localWorkSize[0]) * localWorkSize[0], ((outputHeight + localWorkSize[1] - 1) / localWorkSize[1]) * localWorkSize[1], ((channels + localWorkSize[2] - 1) / localWorkSize[2]) * localWorkSize[2]};
-  
+
+  size_t tileWidth = (localWorkSize[0] - 1) * stride + maskWidth;
+  size_t tileHeight = (localWorkSize[1] - 1) * stride + maskWidth;
+  size_t tileSize = tileWidth * tileHeight;
+  err = clSetKernelArg(kernel, 8, tileSize * sizeof(int), NULL);
+  CHECK_ERR(err, "clSetKernelArg 8");
+
   err = clEnqueueNDRangeKernel(queue, kernel, 3, NULL, globalWorkSize, localWorkSize, 0, NULL, NULL);
   CHECK_ERR(err, "clEnqueueNDRangeKernel");
 
