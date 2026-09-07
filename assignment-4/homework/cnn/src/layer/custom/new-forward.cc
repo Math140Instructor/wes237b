@@ -185,7 +185,7 @@ void OpenCLInterface::conv_forward_gemm_opencl(cl_mem device_y, const cl_mem dev
 
     exit(EXIT_FAILURE);
   }
- 
+
   clblast::ClearCache();
 
   //@@ ====== End gemm =====

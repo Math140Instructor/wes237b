@@ -129,7 +129,7 @@ void OpenCLConvolution2D(Image *input0, Matrix *input1, Image *result, int strid
   // size_t globalWorkSize[3] = {(size_t)outputWidth, (size_t)outputHeight, (size_t)channels};
   // size_t localWorkSize[3] = {8, 8, 1};
 
-  size_t localWorkSize[3] = {4, 4, 1};
+  size_t localWorkSize[3] = {8, 8, 1};
   size_t globalWorkSize[3] = {((outputWidth + localWorkSize[0] - 1) / localWorkSize[0]) * localWorkSize[0], ((outputHeight + localWorkSize[1] - 1) / localWorkSize[1]) * localWorkSize[1], ((channels + localWorkSize[2] - 1) / localWorkSize[2]) * localWorkSize[2]};
   
   err = clEnqueueNDRangeKernel(queue, kernel, 3, NULL, globalWorkSize, localWorkSize, 0, NULL, NULL);

@@ -1,3 +1,5 @@
+#define LOCAL_BUFFER_SIZE 1024
+
 __kernel void convolution2D(__global int *inputData, __global int *outputData, __constant int *maskData, int width, int height, int maskWidth, int imageChannels, int stride) {
   int outX = get_global_id(0);
   int outY = get_global_id(1);
@@ -19,14 +21,13 @@ __kernel void convolution2D(__global int *inputData, __global int *outputData, _
   int groupInputY = groupOutY * stride;
 
   int tileWidth = (localWidth - 1) * stride + maskWidth;
-
   int tileHeight = (localHeight - 1) * stride + maskWidth;
 
   int tileSize = tileWidth * tileHeight;
 
-  __local int localData[1024];
+  __local int localData[LOCAL_BUFFER_SIZE];
 
-  if (tileSize > 1024) {
+  if (tileSize > LOCAL_BUFFER_SIZE) {
     if (outX >= outputWidth || outY >= outputHeight || channel >= imageChannels) {
       return;
     }
@@ -54,7 +55,6 @@ __kernel void convolution2D(__global int *inputData, __global int *outputData, _
   }
 
   int localIndex = localY * localWidth + localX;
-
   int localSize = localWidth * localHeight;
 
   /*
