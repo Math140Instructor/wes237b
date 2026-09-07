@@ -1,11 +1,9 @@
 #include <cmath>
 #include <iostream>
-#include <chrono>
 #include <opencv2/opencv.hpp>
 
 using namespace cv;
 using namespace std;
-using namespace std::chrono;
 
 int main() {
     string inputPipeline = "qtiqmmfsrc camera=0 ! "
@@ -24,9 +22,12 @@ int main() {
     CascadeClassifier faceCascade, eyeCascade;
     string cascadePath = "/usr/share/opencv4/haarcascades/";
 
-    if (!faceCascade.load(cascadePath + "haarcascade_frontalface_default.xml") ||
-        !eyeCascade.load(cascadePath + "haarcascade_eye.xml")) {
-        cerr << "Could not load cascade classifiers\n";
+    if (!faceCascade.load(cascadePath + "haarcascade_frontalface_default.xml")) {
+        cerr << "Could not load face cascade\n";
+        return 1;
+    }
+    if (!eyeCascade.load(cascadePath + "haarcascade_eye.xml")) {
+        cerr << "Could not load eye cascade\n";
         return 1;
     }
 
@@ -36,27 +37,21 @@ int main() {
         return 1;
     }
 
-    // Set VideoWriter to realistic processing FPS (e.g. 15.0 FPS) or tune dynamically
-    double targetFps = 15.0;
-
     string outputPipeline = "appsrc ! videoconvert ! x264enc tune=zerolatency ! "
                            "video/x-h264,profile=baseline ! h264parse ! mp4mux ! "
                            "filesink location=output.mp4";
 
     VideoWriter writer;
-    writer.open(outputPipeline, CAP_GSTREAMER, 0, targetFps, frame.size(), true);
+    writer.open(outputPipeline, CAP_GSTREAMER, 0, 30.0, frame.size(), true);
     if (!writer.isOpened()) {
         cerr << "Could not open output video pipeline\n";
         return 1;
     }
 
     int frameCount = 0;
-    const int maxFrames = 150; // 150 frames @ ~15 FPS = ~10 seconds
-    auto startTime = high_resolution_clock::now();
+    const int maxFrames = 300;
 
     do {
-        auto frameStart = high_resolution_clock::now();
-
         Mat gray;
         cvtColor(frame, gray, COLOR_BGR2GRAY);
 
@@ -82,11 +77,14 @@ int main() {
             }
 
             // 3. Ear Bounding Box Estimation (Blue & Cyan)
+            // Ear dimensions proportional to face size
             int earWidth  = face.width * 0.18;
             int earHeight = face.height * 0.35;
-            int earY      = face.y + (face.height * 0.28);
+            int earY      = face.y + (face.height * 0.28); // level with eyes/temple
 
+            // Left Ear (subject's right side)
             Rect leftEarRect(max(0, face.x - (int)(earWidth * 0.6)), earY, earWidth, earHeight);
+            // Right Ear (subject's left side)
             Rect rightEarRect(min(frame.cols - earWidth, face.x + face.width - (int)(earWidth * 0.4)), earY, earWidth, earHeight);
 
             rectangle(frame, leftEarRect, Scalar(255, 0, 0), 2);
@@ -95,7 +93,7 @@ int main() {
             rectangle(frame, rightEarRect, Scalar(255, 255, 0), 2);
             putText(frame, "R Ear", Point(rightEarRect.x, rightEarRect.y - 4), FONT_HERSHEY_SIMPLEX, 0.4, Scalar(255, 255, 0), 1);
 
-            break;
+            break; // Process primary face
         }
 
         writer.write(frame);
@@ -106,11 +104,6 @@ int main() {
         }
 
     } while (frameCount < maxFrames && cap.read(frame) && !frame.empty());
-
-    auto totalTime = duration_cast<milliseconds>(high_resolution_clock::now() - startTime).count();
-    double effectiveFps = (frameCount * 1000.0) / totalTime;
-
-    cout << "Finished in " << totalTime / 1000.0 << "s (" << effectiveFps << " effective FPS)\n";
 
     writer.release();
     cap.release();
