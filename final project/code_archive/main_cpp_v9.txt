@@ -5,7 +5,6 @@
 #include <chrono>
 #include <vector>
 #include <iomanip>
-#include <numeric>
 #include <opencv2/opencv.hpp>
 #include <CL/cl.h>
 
@@ -25,7 +24,7 @@ struct OpenCLContext {
     cl_mem d_dst;
 };
 
-// System Utilization Metrics
+// Profiling Metrics
 struct CpuSnapshot {
     unsigned long long totalUser = 0;
     unsigned long long totalUserLow = 0;
@@ -79,16 +78,6 @@ double readGpuUsage() {
 
     return -1.0;
 }
-
-// Stage Profiling Metrics
-struct StageTimings {
-    double gpuPreprocMs = 0.0;
-    double cpuFaceMs = 0.0;
-    double cpuEyeMs = 0.0;
-    double cpuEarMs = 0.0;
-    double cpuDrawMs = 0.0;
-    double totalFrameCpuMs = 0.0;
-};
 
 bool initOpenCL(OpenCLContext &ocl, const string &kernelFile, int width, int height) {
     cl_uint numPlatforms;
@@ -151,43 +140,32 @@ void cleanupOpenCL(OpenCLContext &ocl) {
     if (ocl.context) clReleaseContext(ocl.context);
 }
 
-// Function to render granular stage telemetry in top-right HUD
-void drawDetailedHUD(Mat &img, double cpuUsage, double gpuUsage, const StageTimings &t, double instantFps, int frameIdx, double elapsedSec) {
+// Function to render top-right aligned telemetry HUD
+void drawBenchmarkHUD(Mat &img, double cpuUsage, double gpuUsage, double kernelMs, double currentFps, int frameIdx) {
     vector<string> lines;
    
-    stringstream ssSys;
-    ssSys << fixed << setprecision(1) << "CPU: " << cpuUsage << "% | GPU: " << (gpuUsage >= 0.0 ? to_string((int)gpuUsage) + "%" : "N/A");
-    lines.push_back(ssSys.str());
+    stringstream ssCpu, ssGpu, ssKernel, ssFps;
+    ssCpu << fixed << setprecision(1) << "CPU: " << cpuUsage << " %";
+    lines.push_back(ssCpu.str());
 
-    stringstream ssFps;
-    ssFps << fixed << setprecision(1) << "FPS: " << instantFps << " | T: " << elapsedSec << "s (F:" << frameIdx << ")";
-    lines.push_back(ssFps.str());
-
-    stringstream ssGpu;
-    ssGpu << fixed << setprecision(2) << "GPU Preproc: " << t.gpuPreprocMs << " ms";
+    if (gpuUsage >= 0.0) {
+        ssGpu << fixed << setprecision(1) << "GPU: " << gpuUsage << " %";
+    } else {
+        ssGpu << "GPU: N/A";
+    }
     lines.push_back(ssGpu.str());
 
-    stringstream ssFace;
-    ssFace << fixed << setprecision(2) << "CPU Face   : " << t.cpuFaceMs << " ms";
-    lines.push_back(ssFace.str());
+    ssKernel << fixed << setprecision(2) << "Kernel: " << kernelMs << " ms";
+    lines.push_back(ssKernel.str());
 
-    stringstream ssEye;
-    ssEye << fixed << setprecision(2) << "CPU Eye    : " << t.cpuEyeMs << " ms";
-    lines.push_back(ssEye.str());
-
-    stringstream ssEar;
-    ssEar << fixed << setprecision(2) << "CPU Ear    : " << t.cpuEarMs << " ms";
-    lines.push_back(ssEar.str());
-
-    stringstream ssTot;
-    ssTot << fixed << setprecision(2) << "CPU Tot/Frm: " << t.totalFrameCpuMs << " ms";
-    lines.push_back(ssTot.str());
+    ssFps << fixed << setprecision(1) << "FPS: " << currentFps << " (F:" << frameIdx << ")";
+    lines.push_back(ssFps.str());
 
     int fontFace = FONT_HERSHEY_SIMPLEX;
-    double fontScale = 0.45;
+    double fontScale = 0.5;
     int thickness = 1;
-    int lineSpacing = 19;
-    int margin = 10;
+    int lineSpacing = 22;
+    int margin = 12;
 
     int maxTextWidth = 0;
     for (const auto &text : lines) {
@@ -203,20 +181,21 @@ void drawDetailedHUD(Mat &img, double cpuUsage, double gpuUsage, const StageTimi
     int boxX = img.cols - boxWidth - 10;
     int boxY = 10;
 
+    // Render semi-transparent dark background
     Rect hudRect(boxX, boxY, boxWidth, boxHeight);
     if (hudRect.x >= 0 && hudRect.y >= 0 && hudRect.x + hudRect.width <= img.cols && hudRect.y + hudRect.height <= img.rows) {
         Mat roi = img(hudRect);
         Mat overlay;
         roi.copyTo(overlay);
         rectangle(overlay, Rect(0, 0, boxWidth, boxHeight), Scalar(15, 15, 15), FILLED);
-        addWeighted(overlay, 0.75, roi, 0.25, 0, roi);
-        rectangle(img, hudRect, Scalar(90, 90, 90), 1);
+        addWeighted(overlay, 0.7, roi, 0.3, 0, roi);
+        rectangle(img, hudRect, Scalar(80, 80, 80), 1);
     }
 
+    // Render telemetry lines
     int textY = boxY + margin + 12;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        Scalar color = (i < 2) ? Scalar(0, 255, 255) : (i == 2 ? Scalar(255, 200, 0) : Scalar(0, 255, 0));
-        putText(img, lines[i], Point(boxX + margin, textY), fontFace, fontScale, color, thickness, LINE_AA);
+    for (const auto &text : lines) {
+        putText(img, text, Point(boxX + margin, textY), fontFace, fontScale, Scalar(0, 255, 255), thickness, LINE_AA);
         textY += lineSpacing;
     }
 }
@@ -270,39 +249,32 @@ int main() {
     Mat smallGray(smallHeight, smallWidth, CV_8UC1);
     const double invScale = 2.0;
 
-    // Benchmark Trackers
     CpuSnapshot lastCpuSnap = readCpuSnapshot();
     auto lastBenchmarkTime = high_resolution_clock::now();
     double currentCpuPct = 0.0;
     double currentGpuPct = 0.0;
+    double currentKernelMs = 0.0;
+    double totalGpuKernelTimeMs = 0.0;
 
-    // Cumulative Stage Timers
-    double totalGpuPreprocMs = 0.0;
-    double totalCpuFaceMs    = 0.0;
-    double totalCpuEyeMs     = 0.0;
-    double totalCpuEarMs     = 0.0;
-    double totalCpuDrawMs    = 0.0;
-    double totalCpuActiveMs  = 0.0;
-
-    cout << "\n=================================== BENCHMARK MONITOR ===================================\n";
+    cout << "\n============================== BENCHMARK MONITOR ==============================\n";
     cout << "Recording for " << targetDurationSeconds << " seconds in 1:1 real-time...\n";
-    cout << "-----------------------------------------------------------------------------------------\n";
+    cout << "--------------------------------------------------------------------------------\n";
 
     auto startTime = high_resolution_clock::now();
     auto lastFrameTimestamp = startTime;
 
     while (duration_cast<seconds>(high_resolution_clock::now() - startTime).count() < targetDurationSeconds) {
         auto frameLoopStart = high_resolution_clock::now();
-        StageTimings timings;
 
         if (!cap.read(frame) || frame.empty()) {
             cerr << "Frame capture error.\n";
             break;
         }
 
-        // --- STAGE 1: GPU PREPROCESSING (OpenCL Kernel) ---
+        // 1. Upload BGR frame to GPU memory
         clEnqueueWriteBuffer(ocl.queue, ocl.d_src, CL_FALSE, 0, fullWidth * fullHeight * 3, frame.data, 0, NULL, NULL);
 
+        // 2. Set Kernel Arguments
         int srcStep = (int)frame.step;
         int dstStep = (int)smallGray.step;
         clSetKernelArg(ocl.kernel, 0, sizeof(cl_mem), &ocl.d_src);
@@ -312,34 +284,28 @@ int main() {
         clSetKernelArg(ocl.kernel, 4, sizeof(int), &srcStep);
         clSetKernelArg(ocl.kernel, 5, sizeof(int), &dstStep);
 
+        // 3. Launch OpenCL Kernel with event profiling
         cl_event kernelEvent;
         size_t globalWorkSize[2] = { (size_t)smallWidth, (size_t)smallHeight };
         size_t localWorkSize[2]  = { 16, 16 };
         clEnqueueNDRangeKernel(ocl.queue, ocl.kernel, 2, NULL, globalWorkSize, localWorkSize, 0, NULL, &kernelEvent);
+
+        // 4. Download downsampled Grayscale image from GPU
         clEnqueueReadBuffer(ocl.queue, ocl.d_dst, CL_TRUE, 0, smallWidth * smallHeight, smallGray.data, 0, NULL, NULL);
 
         clWaitForEvents(1, &kernelEvent);
         cl_ulong kStart = 0, kEnd = 0;
         clGetEventProfilingInfo(kernelEvent, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &kStart, NULL);
         clGetEventProfilingInfo(kernelEvent, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &kEnd, NULL);
-        timings.gpuPreprocMs = (kEnd - kStart) * 1e-6;
-        totalGpuPreprocMs += timings.gpuPreprocMs;
+        currentKernelMs = (kEnd - kStart) * 1e-6;
+        totalGpuKernelTimeMs += currentKernelMs;
         clReleaseEvent(kernelEvent);
 
-        // --- STAGE 2: CPU FACE DETECTION ---
-        auto tFaceStart = high_resolution_clock::now();
+        // 5. Cascade Detection
         vector<Rect> faces;
         faceCascade.detectMultiScale(smallGray, faces, 1.1, 4, 0, Size(30, 30));
-        timings.cpuFaceMs = duration_cast<microseconds>(high_resolution_clock::now() - tFaceStart).count() / 1000.0;
-        totalCpuFaceMs += timings.cpuFaceMs;
-
-        // Stage 3 & 4: Eyes & Ears
-        timings.cpuEyeMs = 0.0;
-        timings.cpuEarMs = 0.0;
-        timings.cpuDrawMs = 0.0;
 
         for (const Rect &sFace : faces) {
-            auto tDrawStart = high_resolution_clock::now();
             Rect face(cvRound(sFace.x * invScale),
                       cvRound(sFace.y * invScale),
                       cvRound(sFace.width * invScale),
@@ -347,17 +313,11 @@ int main() {
 
             rectangle(frame, face, Scalar(0, 0, 255), 2);
             putText(frame, "Face", Point(face.x, face.y - 5), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 255), 1);
-            timings.cpuDrawMs += duration_cast<microseconds>(high_resolution_clock::now() - tDrawStart).count() / 1000.0;
 
-            // --- STAGE 3: CPU EYE DETECTION ---
-            auto tEyeStart = high_resolution_clock::now();
             Mat faceROI = smallGray(sFace);
             vector<Rect> eyes;
             eyeCascade.detectMultiScale(faceROI, eyes, 1.1, 4, 0, Size(15, 15));
-            timings.cpuEyeMs = duration_cast<microseconds>(high_resolution_clock::now() - tEyeStart).count() / 1000.0;
-            totalCpuEyeMs += timings.cpuEyeMs;
 
-            tDrawStart = high_resolution_clock::now();
             for (const Rect &sEye : eyes) {
                 Rect eyeGlobal(
                     cvRound((sFace.x + sEye.x) * invScale),
@@ -368,35 +328,24 @@ int main() {
                 rectangle(frame, eyeGlobal, Scalar(0, 255, 0), 2);
                 putText(frame, "Eye", Point(eyeGlobal.x, eyeGlobal.y - 4), FONT_HERSHEY_SIMPLEX, 0.4, Scalar(0, 255, 0), 1);
             }
-            timings.cpuDrawMs += duration_cast<microseconds>(high_resolution_clock::now() - tDrawStart).count() / 1000.0;
 
-            // --- STAGE 4: CPU EAR ESTIMATION ---
-            auto tEarStart = high_resolution_clock::now();
             int earWidth  = static_cast<int>(face.width * 0.18);
             int earHeight = static_cast<int>(face.height * 0.35);
             int earY      = face.y + static_cast<int>(face.height * 0.28);
 
             Rect leftEarRect(max(0, face.x - static_cast<int>(earWidth * 0.6)), earY, earWidth, earHeight);
             Rect rightEarRect(min(frame.cols - earWidth, face.x + face.width - static_cast<int>(earWidth * 0.4)), earY, earWidth, earHeight);
-            timings.cpuEarMs = duration_cast<microseconds>(high_resolution_clock::now() - tEarStart).count() / 1000.0;
-            totalCpuEarMs += timings.cpuEarMs;
 
-            tDrawStart = high_resolution_clock::now();
             rectangle(frame, leftEarRect, Scalar(255, 0, 0), 2);
             putText(frame, "L Ear", Point(leftEarRect.x, leftEarRect.y - 4), FONT_HERSHEY_SIMPLEX, 0.4, Scalar(255, 0, 0), 1);
 
             rectangle(frame, rightEarRect, Scalar(255, 255, 0), 2);
             putText(frame, "R Ear", Point(rightEarRect.x, rightEarRect.y - 4), FONT_HERSHEY_SIMPLEX, 0.4, Scalar(255, 255, 0), 1);
-            timings.cpuDrawMs += duration_cast<microseconds>(high_resolution_clock::now() - tDrawStart).count() / 1000.0;
 
             break;
         }
 
-        totalCpuDrawMs += timings.cpuDrawMs;
-        timings.totalFrameCpuMs = timings.cpuFaceMs + timings.cpuEyeMs + timings.cpuEarMs + timings.cpuDrawMs;
-        totalCpuActiveMs += timings.totalFrameCpuMs;
-
-        // Periodic System Telemetry Check
+        // Periodic System Usage Sampling (Every 500 ms)
         auto now = high_resolution_clock::now();
         double intervalSec = duration_cast<milliseconds>(now - lastBenchmarkTime).count() / 1000.0;
         if (intervalSec >= 0.5) {
@@ -406,27 +355,27 @@ int main() {
             lastCpuSnap = currCpuSnap;
             lastBenchmarkTime = now;
 
-            // Terminal Telemetry Output
+            // Terminal log update
             cout << fixed << setprecision(1);
             cout << "[Benchmark] "
                  << setw(2) << duration_cast<seconds>(now - startTime).count() << "s | "
-                 << "F:" << setw(3) << frameCount << " | "
-                 << "CPU:" << setw(4) << currentCpuPct << "% | "
-                 << "GPU:" << setw(4) << (currentGpuPct >= 0.0 ? to_string((int)currentGpuPct) + "%" : "N/A") << " | "
-                 << setprecision(2)
-                 << "GPU-Pre:" << setw(5) << timings.gpuPreprocMs << "ms | "
-                 << "Face:" << setw(5) << timings.cpuFaceMs << "ms | "
-                 << "Eye:" << setw(5) << timings.cpuEyeMs << "ms | "
-                 << "Ear:" << setw(4) << timings.cpuEarMs << "ms" << endl;
+                 << "Frames: " << setw(3) << frameCount << " | "
+                 << "CPU: " << setw(5) << currentCpuPct << "% | ";
+            if (currentGpuPct >= 0.0) {
+                cout << "GPU: " << setw(5) << currentGpuPct << "% | ";
+            } else {
+                cout << "GPU: N/A | ";
+            }
+            cout << "Kernel: " << setprecision(2) << currentKernelMs << " ms" << endl;
         }
 
+        // Calculate instantaneous loop FPS
         double frameDeltaMs = duration_cast<microseconds>(now - lastFrameTimestamp).count() / 1000.0;
         lastFrameTimestamp = now;
         double instantFps = (frameDeltaMs > 0.0) ? (1000.0 / frameDeltaMs) : 0.0;
-        double elapsedSec = duration_cast<milliseconds>(now - startTime).count() / 1000.0;
 
-        // Render On-Screen Display HUD
-        drawDetailedHUD(frame, currentCpuPct, currentGpuPct, timings, instantFps, frameCount + 1, elapsedSec);
+        // 6. Draw Benchmark HUD in the top right corner of the frame
+        drawBenchmarkHUD(frame, currentCpuPct, currentGpuPct, currentKernelMs, instantFps, frameCount + 1);
 
         frameBuffer.push_back(frame.clone());
         frameCount++;
@@ -440,30 +389,16 @@ int main() {
     }
 
     double effectiveFps = (frameCount * 1000.0) / totalTimeMs;
+    double avgKernelMs = totalGpuKernelTimeMs / frameCount;
 
-    // Terminal Summary
-    cout << "\n=================================== FINAL BENCHMARK SUMMARY ===================================\n";
-    cout << fixed << setprecision(2);
-    cout << "Total Program Runtime  : " << totalTimeMs / 1000.0 << " s (" << totalTimeMs << " ms)\n";
-    cout << "Total Frames Captured  : " << frameCount << "\n";
-    cout << "Average Throughput     : " << effectiveFps << " FPS\n";
-    cout << "-----------------------------------------------------------------------------------------------\n";
-    cout << "TOTAL STAGE TIMES (Cumulative across entire run):\n";
-    cout << "  * Total GPU Kernel Time (Preproc) : " << setw(8) << totalGpuPreprocMs << " ms (" << (totalGpuPreprocMs / totalTimeMs) * 100.0 << "% of wall-clock)\n";
-    cout << "  * Total CPU Face Detection Time   : " << setw(8) << totalCpuFaceMs    << " ms (" << (totalCpuFaceMs / totalTimeMs) * 100.0 << "% of wall-clock)\n";
-    cout << "  * Total CPU Eye Detection Time    : " << setw(8) << totalCpuEyeMs     << " ms (" << (totalCpuEyeMs / totalTimeMs) * 100.0 << "% of wall-clock)\n";
-    cout << "  * Total CPU Ear Estimation Time   : " << setw(8) << totalCpuEarMs     << " ms (" << (totalCpuEarMs / totalTimeMs) * 100.0 << "% of wall-clock)\n";
-    cout << "  * Total CPU Drawing & Annotation  : " << setw(8) << totalCpuDrawMs    << " ms (" << (totalCpuDrawMs / totalTimeMs) * 100.0 << "% of wall-clock)\n";
-    cout << "  * Total CPU Processing Time       : " << setw(8) << totalCpuActiveMs  << " ms (" << (totalCpuActiveMs / totalTimeMs) * 100.0 << "% of wall-clock)\n";
-    cout << "-----------------------------------------------------------------------------------------------\n";
-    cout << "AVERAGE PER-FRAME LATENCIES:\n";
-    cout << "  * GPU Preprocessing (kernel.cl)   : " << setw(6) << totalGpuPreprocMs / frameCount << " ms/frame\n";
-    cout << "  * CPU Face Detection              : " << setw(6) << totalCpuFaceMs / frameCount    << " ms/frame\n";
-    cout << "  * CPU Eye Detection               : " << setw(6) << totalCpuEyeMs / frameCount     << " ms/frame\n";
-    cout << "  * CPU Ear Estimation              : " << setw(6) << totalCpuEarMs / frameCount     << " ms/frame\n";
-    cout << "  * CPU Total Processing / Frame    : " << setw(6) << totalCpuActiveMs / frameCount  << " ms/frame\n";
-    cout << "===============================================================================================\n\n";
+    cout << "\n============================ FINAL BENCHMARK SUMMARY ============================\n";
+    cout << "Total Runtime      : " << totalTimeMs / 1000.0 << " s\n";
+    cout << "Total Frames       : " << frameCount << "\n";
+    cout << "Throughput         : " << effectiveFps << " FPS\n";
+    cout << "Avg OpenCL Kernel  : " << avgKernelMs << " ms per frame\n";
+    cout << "=================================================================================\n\n";
 
+    // Hardware encoder pipeline
     string outputPipeline = "appsrc ! videoconvert ! v4l2h264enc ! "
                            "video/x-h264,profile=baseline ! h264parse ! mp4mux ! "
                            "filesink location=output.mp4";
@@ -483,7 +418,7 @@ int main() {
         }
     }
 
-    cout << "Encoding video stream to disk with telemetry overlays...\n";
+    cout << "Writing video stream to disk with overlay telemetry...\n";
     for (const auto &bufferedFrame : frameBuffer) {
         writer.write(bufferedFrame);
     }
