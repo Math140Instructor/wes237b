@@ -5,8 +5,7 @@
 #include <csignal>
 #include <cstring>
 #include <iostream>
-#include <mutex>
-#include <netinet/in.h>
+#include <chrono>
 #include <opencv2/opencv.hpp>
 #include <sys/socket.h>
 #include <thread>
@@ -15,6 +14,7 @@
 
 using namespace cv;
 using namespace std;
+using namespace std::chrono;
 
 // ============================================================
 // Shared JPEG frame
@@ -264,256 +264,112 @@ void webServer(int port) {
 // ============================================================
 
 int main() {
+    string inputPipeline = "qtiqmmfsrc camera=0 ! "
+                           "video/x-raw,format=NV12,width=1280,height=720,framerate=30/1 ! "
+                           "videoconvert ! "
+                           "video/x-raw,format=BGR ! "
+                           "appsink drop=true sync=false";
 
-  // Prevent disconnected browser sockets from terminating program
-  signal(SIGPIPE, SIG_IGN);
+    VideoCapture cap(inputPipeline, CAP_GSTREAMER);
+    if (!cap.isOpened()) {
+        cerr << "Could not open RB3 camera\n";
+        return 1;
+    }
+    cout << "RB3 camera opened\n";
 
-  // ----------------------------------------------------------
-  // RB3 camera
-  // ----------------------------------------------------------
+    CascadeClassifier faceCascade, eyeCascade;
+    string cascadePath = "/usr/share/opencv4/haarcascades/";
 
-  string inputPipeline = "qtiqmmfsrc camera=0 ! "
-                         "video/x-raw,format=NV12,width=640,height=480,framerate=30/1 ! "
-                         "videoconvert ! "
-                         "video/x-raw,format=BGR ! "
-                         "appsink max-buffers=1 drop=true sync=false";
+    if (!faceCascade.load(cascadePath + "haarcascade_frontalface_default.xml") ||
+        !eyeCascade.load(cascadePath + "haarcascade_eye.xml")) {
+        cerr << "Could not load cascade classifiers\n";
+        return 1;
+    }
 
-  VideoCapture cap(inputPipeline, CAP_GSTREAMER);
-
-  if (!cap.isOpened()) {
-
-    cerr << "Could not open RB3 camera\n";
-
-    return 1;
-  }
-
-  cout << "RB3 camera opened\n";
-
-  // ----------------------------------------------------------
-  // Haar cascades
-  // ----------------------------------------------------------
-
-  CascadeClassifier faceCascade;
-  CascadeClassifier eyeCascade;
-
-  if (!faceCascade.load("/usr/share/opencv4/haarcascades/"
-                        "haarcascade_frontalface_default.xml")) {
-
-    cerr << "Could not load face cascade\n";
-
-    return 1;
-  }
-
-  if (!eyeCascade.load("/usr/share/opencv4/haarcascades/"
-                       "haarcascade_eye.xml")) {
-
-    cerr << "Could not load eye cascade\n";
-
-    return 1;
-  }
-
-  // ----------------------------------------------------------
-  // Glasses image
-  // ----------------------------------------------------------
-
-  Mat glasses = imread("glasses.png", IMREAD_UNCHANGED);
-
-  if (glasses.empty()) {
-
-    cerr << "Could not load glasses.png\n";
-
-    return 1;
-  }
-
-  if (glasses.channels() != 4) {
-
-    cerr << "glasses.png must have alpha channel\n";
-
-    return 1;
-  }
-
-  // ----------------------------------------------------------
-  // Start web server
-  // ----------------------------------------------------------
-
-  thread serverThread(webServer, 8080);
-
-  // ----------------------------------------------------------
-  // Camera processing loop
-  // ----------------------------------------------------------
-
-  Mat frame;
-
-  while (running) {
-
+    Mat frame;
     if (!cap.read(frame) || frame.empty()) {
-
-      cerr << "Could not read camera frame\n";
-
-      break;
+        cerr << "Could not read first camera frame\n";
+        return 1;
     }
 
-    Mat gray;
+    // Set VideoWriter to realistic processing FPS (e.g. 15.0 FPS) or tune dynamically
+    double targetFps = 15.0;
 
-    cvtColor(frame, gray, COLOR_BGR2GRAY);
+    string outputPipeline = "appsrc ! videoconvert ! x264enc tune=zerolatency ! "
+                           "video/x-h264,profile=baseline ! h264parse ! mp4mux ! "
+                           "filesink location=output.mp4";
 
-    vector<Rect> faces;
+    VideoWriter writer;
+    writer.open(outputPipeline, CAP_GSTREAMER, 0, targetFps, frame.size(), true);
+    if (!writer.isOpened()) {
+        cerr << "Could not open output video pipeline\n";
+        return 1;
+    }
 
-    faceCascade.detectMultiScale(gray, faces, 1.1, 5);
+    int frameCount = 0;
+    const int maxFrames = 150; // 150 frames @ ~15 FPS = ~10 seconds
+    auto startTime = high_resolution_clock::now();
 
-    // ========================================================
-    // Face processing
-    // ========================================================
+    do {
+        auto frameStart = high_resolution_clock::now();
 
-    for (const Rect &face : faces) {
+        Mat gray;
+        cvtColor(frame, gray, COLOR_BGR2GRAY);
 
-      Mat faceROI = gray(face);
+        vector<Rect> faces;
+        faceCascade.detectMultiScale(gray, faces, 1.1, 5);
 
-      vector<Rect> eyes;
+        for (const Rect &face : faces) {
+            // 1. Draw Face Box (Red)
+            rectangle(frame, face, Scalar(0, 0, 255), 2);
+            putText(frame, "Face", Point(face.x, face.y - 5), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 255), 1);
 
-      eyeCascade.detectMultiScale(faceROI, eyes, 1.1, 5);
+            Mat faceROI = gray(face);
+            vector<Rect> eyes;
+            eyeCascade.detectMultiScale(faceROI, eyes, 1.1, 5);
 
-      if (eyes.size() < 2) {
-        continue;
-      }
+            // 2. Draw Eye Boxes (Green)
+            for (const Rect &eye : eyes) {
+                Rect eyeGlobal = eye;
+                eyeGlobal.x += face.x;
+                eyeGlobal.y += face.y;
+                rectangle(frame, eyeGlobal, Scalar(0, 255, 0), 2);
+                putText(frame, "Eye", Point(eyeGlobal.x, eyeGlobal.y - 4), FONT_HERSHEY_SIMPLEX, 0.4, Scalar(0, 255, 0), 1);
+            }
 
-      Point2f eye1(face.x + eyes[0].x + eyes[0].width / 2.0f,
+            // 3. Ear Bounding Box Estimation (Blue & Cyan)
+            int earWidth  = face.width * 0.18;
+            int earHeight = face.height * 0.35;
+            int earY      = face.y + (face.height * 0.28);
 
-                   face.y + eyes[0].y + eyes[0].height / 2.0f);
+            Rect leftEarRect(max(0, face.x - (int)(earWidth * 0.6)), earY, earWidth, earHeight);
+            Rect rightEarRect(min(frame.cols - earWidth, face.x + face.width - (int)(earWidth * 0.4)), earY, earWidth, earHeight);
 
-      Point2f eye2(face.x + eyes[1].x + eyes[1].width / 2.0f,
+            rectangle(frame, leftEarRect, Scalar(255, 0, 0), 2);
+            putText(frame, "L Ear", Point(leftEarRect.x, leftEarRect.y - 4), FONT_HERSHEY_SIMPLEX, 0.4, Scalar(255, 0, 0), 1);
 
-                   face.y + eyes[1].y + eyes[1].height / 2.0f);
+            rectangle(frame, rightEarRect, Scalar(255, 255, 0), 2);
+            putText(frame, "R Ear", Point(rightEarRect.x, rightEarRect.y - 4), FONT_HERSHEY_SIMPLEX, 0.4, Scalar(255, 255, 0), 1);
 
-      if (eye1.x > eye2.x) {
-        swap(eye1, eye2);
-      }
-
-      double dx = eye2.x - eye1.x;
-
-      double dy = eye2.y - eye1.y;
-
-      double angle = atan2(dy, dx) * 180.0 / CV_PI;
-
-      double eyeDistance = sqrt(dx * dx + dy * dy);
-
-      if (eyeDistance <= 1.0) {
-        continue;
-      }
-
-      Point2f center((eye1.x + eye2.x) / 2.0f, (eye1.y + eye2.y) / 2.0f);
-
-      // Debug eye markers
-      circle(frame, eye1, 5, Scalar(0, 255, 0), -1);
-
-      circle(frame, eye2, 5, Scalar(0, 255, 0), -1);
-
-      // ------------------------------------------------------
-      // Resize glasses
-      // ------------------------------------------------------
-
-      int width = static_cast<int>(eyeDistance * 2.2);
-
-      if (width <= 0) {
-        continue;
-      }
-
-      int height = static_cast<int>(width * static_cast<double>(glasses.rows) / glasses.cols);
-
-      if (height <= 0) {
-        continue;
-      }
-
-      Mat resized;
-
-      resize(glasses, resized, Size(width, height));
-
-      // ------------------------------------------------------
-      // Rotate glasses
-      // ------------------------------------------------------
-
-      Point2f glassCenter(resized.cols / 2.0f, resized.rows / 2.0f);
-
-      Mat rotation = getRotationMatrix2D(glassCenter, angle, 1.0);
-
-      Mat rotated;
-
-      warpAffine(resized, rotated, rotation, resized.size(), INTER_LINEAR, BORDER_CONSTANT, Scalar(0, 0, 0, 0));
-
-      int x = static_cast<int>(center.x - rotated.cols / 2.0f);
-
-      int y = static_cast<int>(center.y - rotated.rows / 2.0f);
-
-      // ------------------------------------------------------
-      // Alpha blending
-      // ------------------------------------------------------
-
-      for (int gy = 0; gy < rotated.rows; gy++) {
-
-        for (int gx = 0; gx < rotated.cols; gx++) {
-
-          int fx = x + gx;
-          int fy = y + gy;
-
-          if (fx < 0 || fy < 0 || fx >= frame.cols || fy >= frame.rows) {
-
-            continue;
-          }
-
-          Vec4b pixel = rotated.at<Vec4b>(gy, gx);
-
-          float alpha = pixel[3] / 255.0f;
-
-          for (int c = 0; c < 3; c++) {
-
-            frame.at<Vec3b>(fy, fx)[c] = static_cast<uchar>(pixel[c] * alpha +
-
-                                                            frame.at<Vec3b>(fy, fx)[c] * (1.0f - alpha));
-          }
+            break;
         }
-      }
 
-      break;
-    }
+        writer.write(frame);
+        frameCount++;
 
-    // ========================================================
-    // JPEG encode for browser
-    // ========================================================
+        if (frameCount % 30 == 0) {
+            cout << "Processed " << frameCount << " frames" << endl;
+        }
 
-    vector<uchar> jpeg;
+    } while (frameCount < maxFrames && cap.read(frame) && !frame.empty());
 
-    vector<int> jpegParameters = {IMWRITE_JPEG_QUALITY, 80};
+    auto totalTime = duration_cast<milliseconds>(high_resolution_clock::now() - startTime).count();
+    double effectiveFps = (frameCount * 1000.0) / totalTime;
 
-    if (!imencode(".jpg", frame, jpeg, jpegParameters)) {
+    cout << "Finished in " << totalTime / 1000.0 << "s (" << effectiveFps << " effective FPS)\n";
 
-      cerr << "JPEG encode failed\n";
-      continue;
-    }
-
-    // Publish latest frame
-    {
-      lock_guard<mutex> lock(frameMutex);
-
-      latestJpeg.swap(jpeg);
-
-      frameSequence++;
-    }
-
-    frameCondition.notify_all();
-  }
-
-  running = false;
-
-  frameCondition.notify_all();
-
-  cap.release();
-
-  if (serverThread.joinable()) {
-
-    // accept() may still be blocked when shutting down.
-    // Normally Ctrl+C/process termination handles this.
-    serverThread.detach();
-  }
-
-  return 0;
+    writer.release();
+    cap.release();
+    cout << "Saved output.mp4\n";
+    return 0;
 }
