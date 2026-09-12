@@ -679,9 +679,7 @@ void drawBenchmarkHUD(
     double gpuUsage,
     double processingMs,
     double currentFps,
-    int frameIdx,
-    double operationalIntensity, // Added for Roofline
-    double gOps) {                // Added for Roofline
+    int frameIdx) {
 
   vector<string> lines;
 
@@ -690,8 +688,6 @@ void drawBenchmarkHUD(
   stringstream ssGpu;
   stringstream ssProcessing;
   stringstream ssFps;
-  stringstream ssIntensity;        // Added for Roofline
-  stringstream ssGops;             // Added for Roofline
 
   ssMode
       << "MODE: "
@@ -736,21 +732,6 @@ void drawBenchmarkHUD(
         << processingMs
         << " ms";
 
-    ssIntensity
-        << fixed
-        << setprecision(2)
-        << "Intensity: "
-        << operationalIntensity
-        << " Ops/B";
-
-    ssGops
-        << fixed
-        << setprecision(2)
-        << "Perf: "
-        << gOps
-        << " G-Ops/s";
-
-
   } else {
 
     ssProcessing
@@ -763,12 +744,6 @@ void drawBenchmarkHUD(
 
   lines.push_back(
       ssProcessing.str());
-
-  // Only add Roofline metrics when in GPU mode
-  if (useGpu) {
-    lines.push_back(ssIntensity.str());
-    lines.push_back(ssGops.str());
-  }
 
   ssFps
       << fixed
@@ -1373,30 +1348,6 @@ int main(
 
   int frameCount =
       0;
-     
-  // ==========================================================
-  // Roofline Model parameters
-  // ==========================================================
-
-  // These are calculated based on the analysis of kernel.cl
-  // Each output pixel:
-  // - 4x BGR to Gray conversions: 4 * (3 muls + 3 adds) = 24 ops
-  // - 1x Box average: 4 adds = 4 ops
-  // - Total per output pixel = 28 ops
-  const long totalPixelsGpu = static_cast<long>(smallWidth) * smallHeight;
-  const long opsPerPixel = 28;
-  const double totalGigaOps = (static_cast<double>(totalPixelsGpu) * opsPerPixel) / 1e9;
-
-  // Data Transfer:
-  // - Read: 1280x720 BGR image = 1280 * 720 * 3 bytes
-  // - Write: 640x360 Grayscale image = 640 * 360 * 1 byte
-  const size_t bytesRead = static_cast<size_t>(fullWidth) * fullHeight * 3;
-  const size_t bytesWritten = static_cast<size_t>(smallWidth) * smallHeight;
-  const double totalBytes = static_cast<double>(bytesRead + bytesWritten);
-  const double operationalIntensity = (static_cast<double>(totalPixelsGpu) * opsPerPixel) / totalBytes;
-
-  double currentGOps = 0.0;
-
 
   cout
       << "\n================ LIVE BENCHMARK ================\n";
@@ -1500,13 +1451,6 @@ int main(
 
       totalGpuKernelMs +=
           kernelMs;
-     
-      // Calculate G-Ops/s for Roofline
-      if (kernelMs > 0) {
-        currentGOps = totalGigaOps / (kernelMs / 1000.0);
-      } else {
-        currentGOps = 0.0;
-      }
 
       gpuFrameCount++;
 
@@ -1888,15 +1832,8 @@ int main(
           << currentProcessingMs
           << " ms | FPS: "
           << setprecision(1)
-          << instantFps;
-         
-      // Print Roofline metrics to console for GPU mode
-      if (useGpu) {
-        cout << " | Intensity: " << fixed << setprecision(2) << operationalIntensity << " Ops/B"
-             << " | Perf: " << fixed << setprecision(2) << currentGOps << " G-Ops/s";
-      }
-
-      cout << "\n";
+          << instantFps
+          << "\n";
     }
 
     // --------------------------------------------------------
@@ -1910,9 +1847,7 @@ int main(
         currentGpuPct,
         currentProcessingMs,
         instantFps,
-        frameCount + 1,
-        operationalIntensity, // Pass Roofline metric
-        currentGOps);         // Pass Roofline metric
+        frameCount + 1);
 
     // --------------------------------------------------------
     // Accept a viewer without ever blocking the camera loop.
@@ -2101,12 +2036,6 @@ int main(
           ? totalGpuKernelMs /
                 gpuFrameCount
           : 0.0;
-         
-  double avgGpuGOps = 0.0;
-  if (avgGpuKernelMs > 0) {
-    avgGpuGOps = totalGigaOps / (avgGpuKernelMs / 1000.0);
-  }
-
 
   cout
       << "\n================ FINAL BENCHMARK SUMMARY ================\n";
@@ -2150,14 +2079,6 @@ int main(
         << "Avg GPU Kernel      : "
         << avgGpuKernelMs
         << " ms\n";
-       
-    cout
-        << "\n---------- ROOFLINE METRICS (GPU) ----------\n";
-    cout << fixed << setprecision(2);
-    cout << "Operational Intensity: " << operationalIntensity << " Ops/Byte\n";
-    cout << "Achieved Performance: " << avgGpuGOps << " G-Ops/s\n";
-    cout << "------------------------------------------\n";
-
   }
 
   cout

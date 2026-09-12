@@ -495,3 +495,4 @@ int main() {
     cout << "Saved output.mp4 (" << totalTimeMs / 1000.0 << "s at " << effectiveFps << " FPS)\n";
     return 0;
 }
+
