@@ -262,6 +262,13 @@ int main() {
     }
     cout << "OpenCL kernel pipeline initialized on GPU.\n";
 
+    ofstream benchmarkLog("benchmark.log", ios::out | ios::trunc);
+    if (!benchmarkLog.is_open()) {
+        cerr << "Could not open benchmark.log\n";
+        cleanupOpenCL(ocl);
+        return 1;
+    }
+
     const int targetDurationSeconds = 20;
     int frameCount = 0;
     vector<Mat> frameBuffer;
@@ -286,7 +293,13 @@ int main() {
 
     cout << "\n=================================== BENCHMARK MONITOR ===================================\n";
     cout << "Recording for " << targetDurationSeconds << " seconds in 1:1 real-time...\n";
+    cout << "Benchmark metrics will be written to benchmark.log\n";
     cout << "-----------------------------------------------------------------------------------------\n";
+
+    benchmarkLog << "=================================== BENCHMARK MONITOR ===================================\n";
+    benchmarkLog << "Pipeline: GPU grayscale/downscale + CPU face/eye detection + CPU ear estimation/drawing\n";
+    benchmarkLog << "Recording duration: " << targetDurationSeconds << " seconds\n";
+    benchmarkLog << "-----------------------------------------------------------------------------------------\n";
 
     auto startTime = high_resolution_clock::now();
     auto lastFrameTimestamp = startTime;
@@ -365,8 +378,14 @@ int main() {
                     cvRound(sEye.width * invScale),
                     cvRound(sEye.height * invScale)
                 );
+                // Anatomical eye label from the subject's perspective:
+                // image-left is the subject's RIGHT eye; image-right is LEFT eye.
+                double eyeCenterX = sEye.x + (sEye.width * 0.5);
+                double faceCenterX = sFace.width * 0.5;
+                string eyeLabel = (eyeCenterX < faceCenterX) ? "R Eye" : "L Eye";
+
                 rectangle(frame, eyeGlobal, Scalar(0, 255, 0), 2);
-                putText(frame, "Eye", Point(eyeGlobal.x, eyeGlobal.y - 4), FONT_HERSHEY_SIMPLEX, 0.4, Scalar(0, 255, 0), 1);
+                putText(frame, eyeLabel, Point(eyeGlobal.x, eyeGlobal.y - 4), FONT_HERSHEY_SIMPLEX, 0.4, Scalar(0, 255, 0), 1);
             }
             timings.cpuDrawMs += duration_cast<microseconds>(high_resolution_clock::now() - tDrawStart).count() / 1000.0;
 
@@ -406,18 +425,21 @@ int main() {
             lastCpuSnap = currCpuSnap;
             lastBenchmarkTime = now;
 
-            // Terminal Telemetry Output
-            cout << fixed << setprecision(1);
-            cout << "[Benchmark] "
-                 << setw(2) << duration_cast<seconds>(now - startTime).count() << "s | "
-                 << "F:" << setw(3) << frameCount << " | "
-                 << "CPU:" << setw(4) << currentCpuPct << "% | "
-                 << "GPU:" << setw(4) << (currentGpuPct >= 0.0 ? to_string((int)currentGpuPct) + "%" : "N/A") << " | "
-                 << setprecision(2)
-                 << "GPU-Pre:" << setw(5) << timings.gpuPreprocMs << "ms | "
-                 << "Face:" << setw(5) << timings.cpuFaceMs << "ms | "
-                 << "Eye:" << setw(5) << timings.cpuEyeMs << "ms | "
-                 << "Ear:" << setw(4) << timings.cpuEarMs << "ms" << endl;
+            // Benchmark telemetry written to file.
+            // These fields match the stages actually measured by this program.
+            benchmarkLog << fixed << setprecision(1)
+                         << "[Benchmark] "
+                         << setw(2) << duration_cast<seconds>(now - startTime).count() << "s | "
+                         << "CPU:" << setw(4) << currentCpuPct << "% | "
+                         << "GPU:" << setw(4) << (currentGpuPct >= 0.0 ? to_string((int)currentGpuPct) + "%" : "N/A") << " | "
+                         << setprecision(2)
+                         << "GPU-Kernel:" << setw(6) << timings.gpuPreprocMs << "ms | "
+                         << "CPU-Face:" << setw(6) << timings.cpuFaceMs << "ms | "
+                         << "CPU-Eye:" << setw(6) << timings.cpuEyeMs << "ms | "
+                         << "CPU-Ear:" << setw(6) << timings.cpuEarMs << "ms | "
+                         << "CPU-Draw:" << setw(6) << timings.cpuDrawMs << "ms | "
+                         << "CPU-Total:" << setw(6) << timings.totalFrameCpuMs << "ms\n";
+            benchmarkLog.flush();
         }
 
         double frameDeltaMs = duration_cast<microseconds>(now - lastFrameTimestamp).count() / 1000.0;
@@ -441,28 +463,33 @@ int main() {
 
     double effectiveFps = (frameCount * 1000.0) / totalTimeMs;
 
-    // Terminal Summary
-    cout << "\n=================================== FINAL BENCHMARK SUMMARY ===================================\n";
-    cout << fixed << setprecision(2);
-    cout << "Total Program Runtime  : " << totalTimeMs / 1000.0 << " s (" << totalTimeMs << " ms)\n";
-    cout << "Total Frames Captured  : " << frameCount << "\n";
-    cout << "Average Throughput     : " << effectiveFps << " FPS\n";
-    cout << "-----------------------------------------------------------------------------------------------\n";
-    cout << "TOTAL STAGE TIMES (Cumulative across entire run):\n";
-    cout << "  * Total GPU Kernel Time (Preproc) : " << setw(8) << totalGpuPreprocMs << " ms (" << (totalGpuPreprocMs / totalTimeMs) * 100.0 << "% of wall-clock)\n";
-    cout << "  * Total CPU Face Detection Time   : " << setw(8) << totalCpuFaceMs    << " ms (" << (totalCpuFaceMs / totalTimeMs) * 100.0 << "% of wall-clock)\n";
-    cout << "  * Total CPU Eye Detection Time    : " << setw(8) << totalCpuEyeMs     << " ms (" << (totalCpuEyeMs / totalTimeMs) * 100.0 << "% of wall-clock)\n";
-    cout << "  * Total CPU Ear Estimation Time   : " << setw(8) << totalCpuEarMs     << " ms (" << (totalCpuEarMs / totalTimeMs) * 100.0 << "% of wall-clock)\n";
-    cout << "  * Total CPU Drawing & Annotation  : " << setw(8) << totalCpuDrawMs    << " ms (" << (totalCpuDrawMs / totalTimeMs) * 100.0 << "% of wall-clock)\n";
-    cout << "  * Total CPU Processing Time       : " << setw(8) << totalCpuActiveMs  << " ms (" << (totalCpuActiveMs / totalTimeMs) * 100.0 << "% of wall-clock)\n";
-    cout << "-----------------------------------------------------------------------------------------------\n";
-    cout << "AVERAGE PER-FRAME LATENCIES:\n";
-    cout << "  * GPU Preprocessing (kernel.cl)   : " << setw(6) << totalGpuPreprocMs / frameCount << " ms/frame\n";
-    cout << "  * CPU Face Detection              : " << setw(6) << totalCpuFaceMs / frameCount    << " ms/frame\n";
-    cout << "  * CPU Eye Detection               : " << setw(6) << totalCpuEyeMs / frameCount     << " ms/frame\n";
-    cout << "  * CPU Ear Estimation              : " << setw(6) << totalCpuEarMs / frameCount     << " ms/frame\n";
-    cout << "  * CPU Total Processing / Frame    : " << setw(6) << totalCpuActiveMs / frameCount  << " ms/frame\n";
-    cout << "===============================================================================================\n\n";
+    // Final benchmark summary written to benchmark.log.
+    // GPU preprocessing below is kernel execution time only, because that is
+    // what this program measures with OpenCL event profiling.
+    benchmarkLog << "\n=================================== FINAL BENCHMARK SUMMARY ===================================\n";
+    benchmarkLog << fixed << setprecision(2);
+    benchmarkLog << "Program runtime                    : " << totalTimeMs / 1000.0 << " s\n";
+    benchmarkLog << "Observed video throughput          : " << effectiveFps << " FPS\n";
+    benchmarkLog << "-----------------------------------------------------------------------------------------------\n";
+    benchmarkLog << "AVERAGE PER-FRAME LATENCIES:\n";
+    benchmarkLog << "  GPU preprocessing kernel         : " << setw(8) << totalGpuPreprocMs / frameCount << " ms/frame\n";
+    benchmarkLog << "  CPU face detection               : " << setw(8) << totalCpuFaceMs / frameCount    << " ms/frame\n";
+    benchmarkLog << "  CPU eye detection                : " << setw(8) << totalCpuEyeMs / frameCount     << " ms/frame\n";
+    benchmarkLog << "  CPU ear estimation               : " << setw(8) << totalCpuEarMs / frameCount     << " ms/frame\n";
+    benchmarkLog << "  CPU drawing/annotation           : " << setw(8) << totalCpuDrawMs / frameCount    << " ms/frame\n";
+    benchmarkLog << "  CPU total measured work          : " << setw(8) << totalCpuActiveMs / frameCount  << " ms/frame\n";
+    benchmarkLog << "-----------------------------------------------------------------------------------------------\n";
+    benchmarkLog << "CUMULATIVE MEASURED STAGE TIMES:\n";
+    benchmarkLog << "  GPU preprocessing kernel         : " << setw(8) << totalGpuPreprocMs << " ms\n";
+    benchmarkLog << "  CPU face detection               : " << setw(8) << totalCpuFaceMs    << " ms\n";
+    benchmarkLog << "  CPU eye detection                : " << setw(8) << totalCpuEyeMs     << " ms\n";
+    benchmarkLog << "  CPU ear estimation               : " << setw(8) << totalCpuEarMs     << " ms\n";
+    benchmarkLog << "  CPU drawing/annotation           : " << setw(8) << totalCpuDrawMs    << " ms\n";
+    benchmarkLog << "  CPU total measured work          : " << setw(8) << totalCpuActiveMs  << " ms\n";
+    benchmarkLog << "===============================================================================================\n";
+    benchmarkLog.flush();
+
+    cout << "Benchmark complete. Results saved to benchmark.log\n";
 
     string outputPipeline = "appsrc ! videoconvert ! v4l2h264enc ! "
                            "video/x-h264,profile=baseline ! h264parse ! mp4mux ! "
@@ -495,4 +522,3 @@ int main() {
     cout << "Saved output.mp4 (" << totalTimeMs / 1000.0 << "s at " << effectiveFps << " FPS)\n";
     return 0;
 }
-

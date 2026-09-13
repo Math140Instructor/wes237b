@@ -71,30 +71,13 @@ CPU Haar face/eye detection
     -Wl,--allow-shlib-undefined`
 
 ## Build web server
-`g++ -O3 -mcpu=native -std=c++11 main.cpp -o webserver \
-    $(pkg-config --cflags opencv4) \
-    $(pkg-config --libs opencv4) \
-    -pthread \
-    -Wl,--no-as-needed \
-    /lib/aarch64-linux-gnu/libOpenCL.so.1 \
-    -Wl,--allow-shlib-undefined`
 
-    `./webserver`
-    http://localhost:8080/
+g++ -std=c++11 main.cpp -o main \
+  $(pkg-config --cflags opencv4) \
+  $(pkg-config --libs opencv4) \
+  -lOpenCL \
+  -Wl,--allow-shlib-undefined
 
-g++ -O3 -std=c++11 web.cpp \
-    -o web \
-    -pthread
-
-    g++ -O3 -mcpu=native -std=c++11 camera.cpp \
-    -o camera \
-    $(pkg-config --cflags opencv4) \
-    $(pkg-config --libs opencv4) \
-    -Wl,--no-as-needed \
-    /lib/aarch64-linux-gnu/libOpenCL.so.1 \
-    -Wl,--allow-shlib-undefined
-
-./web & ./camera
 
 OUTPUT
 root@ubuntu:/workspaces/wes237b/final project# ./glasses_gpu 
