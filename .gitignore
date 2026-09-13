@@ -61,3 +61,6 @@ assignment*/helper_lib/
 final project/realtime/*.log
 final project/*.log
 final project/main
+final project/testbench/*.log
+final project/testbench/main
+final project/testbench/*.mp4
