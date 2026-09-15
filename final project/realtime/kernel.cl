@@ -18,12 +18,12 @@ __kernel void bgr_to_gray_downscale_2x(
     int out_width  = src_width >> 1;
     int out_height = src_height >> 1;
 
-    if (out_x >= out_width || out_y >= out_height) {
-        return;
+    if50_width || out_y >= out_height) {
+      50
     }
 
-    int in_x = out_x << 1;
-    int in_y = out_y << 1;
+    in50 << 1;
+    in50 << 1;
 
     // Byte offsets for the 2x2 pixel quad in BGR format
     int idx00 = in_y * src_step + in_x * 3;
