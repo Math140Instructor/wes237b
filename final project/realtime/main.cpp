@@ -31,7 +31,6 @@ termios originalTerminalSettings;
 int originalTerminalFlags = 0;
 bool terminalConfigured = false;
 
-
 // OpenCL Context Definitions
 struct OpenCLContext {
   cl_platform_id platform = nullptr;
@@ -39,19 +38,19 @@ struct OpenCLContext {
   cl_context context = nullptr;
   cl_command_queue queue = nullptr;
   cl_program program = nullptr;
-  cl_kernel kernel = nullptr;       // bgr_to_gray_downscale_2x
-  cl_kernel k_draw = nullptr;       // draw_box_borders_gpu
+  cl_kernel kernel = nullptr; // bgr_to_gray_downscale_2x
+  cl_kernel k_draw = nullptr; // draw_box_borders_gpu
   cl_mem d_src = nullptr;
   cl_mem d_dst = nullptr;
   cl_mem d_boxes = nullptr;
 };
 
-// CPU usage 
+// CPU usage
 struct CpuSnapshot {
-  unsigned long long totalUser = 0;
-  unsigned long long totalUserLow = 0;
-  unsigned long long totalSys = 0;
-  unsigned long long totalIdle = 0;
+  unsigned long long totalUser = 0;    // CPU time spent running normal user programs
+  unsigned long long totalUserLow = 0; // CPU time spent running lower-priority user programs
+  unsigned long long totalSys = 0;     // CPU time spent inside the Linux kernel doing system-level work
+  unsigned long long totalIdle = 0;    // CPU idle time
 };
 
 // Benchmark statistics
@@ -74,32 +73,19 @@ struct BenchmarkStats {
 void signalHandler(int) { running = false; }
 
 // enables keyboard input for hotkeys (G to toggle CPU/GPU, Q to quit)
+// change terminal settings. Note, need to restore this when done.
 bool enableNonBlockingInput() {
-  if (!isatty(STDIN_FILENO)) {
-    cerr << "Warning: stdin is not a terminal. Hotkeys disabled.\n";
-    return false;
-  }
 
-  if (tcgetattr(STDIN_FILENO, &originalTerminalSettings) != 0) {
-    cerr << "Warning: could not read terminal settings.\n";
-    return false;
-  }
+  termios settings;
+  tcgetattr(STDIN_FILENO, &settings);
 
-  termios terminalSettings = originalTerminalSettings;
-  terminalSettings.c_lflag &= ~(ICANON | ECHO);
+  // Don't require Enter
+  settings.c_lflag &= ~ICANON;
+  tcsetattr(STDIN_FILENO, TCSANOW, &settings);
 
-  if (tcsetattr(STDIN_FILENO, TCSANOW, &terminalSettings) != 0) {
-    cerr << "Warning: could not configure terminal.\n";
-    return false;
-  }
-
-  originalTerminalFlags = fcntl(STDIN_FILENO, F_GETFL, 0);
-  if (originalTerminalFlags < 0) {
-    originalTerminalFlags = 0;
-  }
-
-  fcntl(STDIN_FILENO, F_SETFL, originalTerminalFlags | O_NONBLOCK);
-  terminalConfigured = true;
+  // Don't wait if no key has been pressed
+  int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+  fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
 
   return true;
 }
@@ -109,7 +95,6 @@ void restoreTerminal() {
   if (!terminalConfigured) {
     return;
   }
-
   tcsetattr(STDIN_FILENO, TCSANOW, &originalTerminalSettings);
   fcntl(STDIN_FILENO, F_SETFL, originalTerminalFlags);
   terminalConfigured = false;
@@ -133,7 +118,7 @@ CpuSnapshot readCpuSnapshot() {
   return snap;
 }
 
-// cpu utilization calculation as percantage over change in time period. compare two snapshots 
+// cpu utilization calculation as percantage over change in time period. compare two snapshots
 double calculateCpuUsage(const CpuSnapshot &prev, const CpuSnapshot &curr) {
   // sum up all ticks to get total cpu work time and idle time, then calculate the percentage of non-idle time
   unsigned long long prevTotal = prev.totalUser + prev.totalUserLow + prev.totalSys + prev.totalIdle;
@@ -268,7 +253,8 @@ bool initOpenCL(OpenCLContext &ocl, const string &kernelFile, int width, int hei
     return false;
   }
 
-  // 5 features (Face, 2 Eyes, 2 Ears) * 8 ints = 40 ints\
+  // each box has 8 ints: [x, y, width, height, valid, B, G, R]
+  // 5 features (Face, 2 Eyes, 2 Ears) * 8 ints = 40 ints
   // allocates storage for face, left eye, right eye, left ear, right ear bounding boxes and their colors (BGR)
   ocl.d_boxes = clCreateBuffer(ocl.context, CL_MEM_READ_ONLY, sizeof(int) * 40, nullptr, &err);
   if (err != CL_SUCCESS) {
@@ -281,14 +267,22 @@ bool initOpenCL(OpenCLContext &ocl, const string &kernelFile, int width, int hei
 
 // Cleanup OpenCL and release all resources
 void cleanupOpenCL(OpenCLContext &ocl) {
-  if (ocl.d_boxes) clReleaseMemObject(ocl.d_boxes);
-  if (ocl.d_src)   clReleaseMemObject(ocl.d_src);
-  if (ocl.d_dst)   clReleaseMemObject(ocl.d_dst);
-  if (ocl.k_draw)  clReleaseKernel(ocl.k_draw);
-  if (ocl.kernel)  clReleaseKernel(ocl.kernel);
-  if (ocl.program) clReleaseProgram(ocl.program);
-  if (ocl.queue)   clReleaseCommandQueue(ocl.queue);
-  if (ocl.context) clReleaseContext(ocl.context);
+  if (ocl.d_boxes)
+    clReleaseMemObject(ocl.d_boxes);
+  if (ocl.d_src)
+    clReleaseMemObject(ocl.d_src);
+  if (ocl.d_dst)
+    clReleaseMemObject(ocl.d_dst);
+  if (ocl.k_draw)
+    clReleaseKernel(ocl.k_draw);
+  if (ocl.kernel)
+    clReleaseKernel(ocl.kernel);
+  if (ocl.program)
+    clReleaseProgram(ocl.program);
+  if (ocl.queue)
+    clReleaseCommandQueue(ocl.queue);
+  if (ocl.context)
+    clReleaseContext(ocl.context);
 }
 
 // downscale using opencv functions on CPU. returns the time taken in milliseconds
@@ -301,20 +295,20 @@ double processCpu(const Mat &frame, Mat &gray, Mat &smallGray, int smallWidth, i
   return duration_cast<microseconds>(end - start).count() / 1000.0;
 }
 
-// transfers the full camera frame to the GPU, executes the kernel, and reads back the downscaled grayscale image for detection. returns true on success, false on failure
-bool processGpu(OpenCLContext &ocl, const Mat &frame, Mat &smallGray, int fullWidth, int fullHeight,
-                int smallWidth, int smallHeight, double &kernelMs, double &endToEndMs) {
+// transfers camera frame to the GPU, executes the kernel, and reads back the downscaled grayscale image for detection
+bool processGpu(OpenCLContext &ocl, const Mat &frame, Mat &smallGray, int fullWidth, int fullHeight, int smallWidth, int smallHeight, double &kernelMs, double &endToEndMs) {
   auto gpuStart = high_resolution_clock::now();
   cl_int err;
 
-  // queue an aync write of the full camera frame to the GPU source buffer
-  size_t sourceBytes = static_cast<size_t>(fullHeight) * frame.step;
+  // write the full camera frame to the GPU buffer
+  size_t sourceBytes = static_cast<size_t>(fullHeight) * frame.step; // number of bytes occupied by one row of the OpenCV Mat, frame.step is 3 pixels because BGR
   err = clEnqueueWriteBuffer(ocl.queue, ocl.d_src, CL_FALSE, 0, sourceBytes, frame.data, 0, nullptr, nullptr);
-  if (err != CL_SUCCESS) return false;
+  if (err != CL_SUCCESS)
+    return false;
 
   // fetch the step sizes (row stride) for the source and destination images to pass to the kernel
-  int srcStep = static_cast<int>(frame.step);
-  int dstStep = static_cast<int>(smallGray.step);
+  int srcStep = static_cast<int>(frame.step);     // BGR
+  int dstStep = static_cast<int>(smallGray.step); // downsampled size
 
   // bind kernel arguments for the grayscale + downscale kernel
   err |= clSetKernelArg(ocl.kernel, 0, sizeof(cl_mem), &ocl.d_src);
@@ -323,24 +317,24 @@ bool processGpu(OpenCLContext &ocl, const Mat &frame, Mat &smallGray, int fullWi
   err |= clSetKernelArg(ocl.kernel, 3, sizeof(int), &fullHeight);
   err |= clSetKernelArg(ocl.kernel, 4, sizeof(int), &srcStep);
   err |= clSetKernelArg(ocl.kernel, 5, sizeof(int), &dstStep);
-  if (err != CL_SUCCESS) return false;
+  if (err != CL_SUCCESS)
+    return false;
 
   // define the global and local work sizes for the kernel execution
   size_t globalWorkSize[2] = {static_cast<size_t>(smallWidth), static_cast<size_t>(smallHeight)};
-  // group threads into 16x16 blocks for better GPU utilization
-  size_t localWorkSize[2]  = {16, 16};
+  // group threads into 16x16 blocks
+  size_t localWorkSize[2] = {16, 16};
   cl_event kernelEvent = nullptr;
 
-  // asynchronously enqueue the kernel for execution on the GPU
+  // enqueue kernel for execution on GPU
   err = clEnqueueNDRangeKernel(ocl.queue, ocl.kernel, 2, nullptr, globalWorkSize, localWorkSize, 0, nullptr, &kernelEvent);
-  if (err != CL_SUCCESS) return false;
+  if (err != CL_SUCCESS)
+    return false;
 
-  // Read back preprocessed small image so OpenCV GPU/CPU cascade can evaluate it
-  err = clEnqueueReadBuffer(ocl.queue, ocl.d_dst, CL_TRUE, 0,
-                            static_cast<size_t>(smallWidth) * static_cast<size_t>(smallHeight),
-                            smallGray.data, 0, nullptr, nullptr);
+  // Read back small image so OpenCV GPU/CPU cascade can evaluate it
+  err = clEnqueueReadBuffer(ocl.queue, ocl.d_dst, CL_TRUE, 0, static_cast<size_t>(smallWidth) * static_cast<size_t>(smallHeight), smallGray.data, 0, nullptr, nullptr);
   if (err != CL_SUCCESS) {
-    clReleaseEvent(kernelEvent); // prevent tracking leaks if fallback returns false
+    clReleaseEvent(kernelEvent);
     return false;
   }
 
@@ -348,12 +342,13 @@ bool processGpu(OpenCLContext &ocl, const Mat &frame, Mat &smallGray, int fullWi
   auto gpuEnd = high_resolution_clock::now();
   endToEndMs = duration_cast<microseconds>(gpuEnd - gpuStart).count() / 1000.0;
 
-  // extract kernel execution time from the profiling event to measure just the GPU compute time
+  // measure the GPU compute time
+  // https://registry.khronos.org/OpenCL/specs/unified/refpages/man/html/clGetEventProfilingInfo.html‰
   cl_ulong kernelStart = 0, kernelEnd = 0;
   clGetEventProfilingInfo(kernelEvent, CL_PROFILING_COMMAND_START, sizeof(kernelStart), &kernelStart, nullptr);
-  clGetEventProfilingInfo(kernelEvent, CL_PROFILING_COMMAND_END,   sizeof(kernelEnd),   &kernelEnd,   nullptr);
+  clGetEventProfilingInfo(kernelEvent, CL_PROFILING_COMMAND_END, sizeof(kernelEnd), &kernelEnd, nullptr);
 
-  // core kernel execution time in milliseconds 
+  // core kernel execution time in milliseconds
   kernelMs = static_cast<double>(kernelEnd - kernelStart) * 1e-6;
   clReleaseEvent(kernelEvent);
   return true;
@@ -361,36 +356,38 @@ bool processGpu(OpenCLContext &ocl, const Mat &frame, Mat &smallGray, int fullWi
 
 // GPU Bounding Box Drawing Kernel
 // transfers bounding box data to the GPU, executes the kernel to draw boxes on the original frame, and reads back the annotated frame
-bool processGpuDrawBoxes(OpenCLContext &ocl, Mat &frame, int fullWidth, int fullHeight,
-                        const int *boxData, int numBoxes, int thickness, double &drawMs) {
+bool processGpuDrawBoxes(OpenCLContext &ocl, Mat &frame, int fullWidth, int fullHeight, const int *boxData, int numBoxes, int thickness, double &drawMs) {
   auto start = high_resolution_clock::now();
   cl_int err;
 
   // Upload box coordinates and colors to GPU buffer
   err = clEnqueueWriteBuffer(ocl.queue, ocl.d_boxes, CL_FALSE, 0, sizeof(int) * numBoxes * 8, boxData, 0, nullptr, nullptr);
-  if (err != CL_SUCCESS) return false;
+  if (err != CL_SUCCESS)
+    return false;
 
   // fetch the step size (row stride) for the source image to pass to the kernel
-  int frameStep = static_cast<int>(frame.step);
+  int frameStep = static_cast<int>(frame.step); // BGR
 
   // bind kernel arguments for the draw boxes kernel
   err |= clSetKernelArg(ocl.k_draw, 0, sizeof(cl_mem), &ocl.d_src);
-  err |= clSetKernelArg(ocl.k_draw, 1, sizeof(int), &fullWidth);
-  err |= clSetKernelArg(ocl.k_draw, 2, sizeof(int), &fullHeight);
+  err |= clSetKernelArg(ocl.k_draw, 1, sizeof(int), &fullWidth);  // original frame width
+  err |= clSetKernelArg(ocl.k_draw, 2, sizeof(int), &fullHeight); // original frame height
   err |= clSetKernelArg(ocl.k_draw, 3, sizeof(int), &frameStep);
   err |= clSetKernelArg(ocl.k_draw, 4, sizeof(cl_mem), &ocl.d_boxes);
   err |= clSetKernelArg(ocl.k_draw, 5, sizeof(int), &numBoxes);
   err |= clSetKernelArg(ocl.k_draw, 6, sizeof(int), &thickness);
-  if (err != CL_SUCCESS) return false;
+  if (err != CL_SUCCESS)
+    return false;
 
   // define the global and local work sizes for the kernel execution
   size_t globalWorkSize[2] = {static_cast<size_t>(fullWidth), static_cast<size_t>(fullHeight)};
-  size_t localWorkSize[2]  = {16, 16};
+  size_t localWorkSize[2] = {16, 16};
   cl_event drawEvent = nullptr;
 
-  // asynchronously enqueue the draw boxes kernel for execution on the GPU
+  // enqueue the draw boxes kernel for execution on the GPU
   err = clEnqueueNDRangeKernel(ocl.queue, ocl.k_draw, 2, nullptr, globalWorkSize, localWorkSize, 0, nullptr, &drawEvent);
-  if (err != CL_SUCCESS) return false;
+  if (err != CL_SUCCESS)
+    return false;
 
   // Read back annotated frame from GPU memory
   size_t frameBytes = static_cast<size_t>(fullHeight) * frame.step;
@@ -402,9 +399,11 @@ bool processGpuDrawBoxes(OpenCLContext &ocl, Mat &frame, int fullWidth, int full
 
   // wait for the draw kernel to finish and measure its execution time using the profiling event
   clWaitForEvents(1, &drawEvent);
+
+  // calculate gpu runtime
   cl_ulong kStart = 0, kEnd = 0;
   clGetEventProfilingInfo(drawEvent, CL_PROFILING_COMMAND_START, sizeof(kStart), &kStart, nullptr);
-  clGetEventProfilingInfo(drawEvent, CL_PROFILING_COMMAND_END,   sizeof(kEnd),   &kEnd,   nullptr);
+  clGetEventProfilingInfo(drawEvent, CL_PROFILING_COMMAND_END, sizeof(kEnd), &kEnd, nullptr);
   drawMs = static_cast<double>(kEnd - kStart) * 1e-6;
   clReleaseEvent(drawEvent);
 
@@ -413,10 +412,8 @@ bool processGpuDrawBoxes(OpenCLContext &ocl, Mat &frame, int fullWidth, int full
 }
 
 // Draw benchmark statistics panel
-// draws a heads-up display on the video frame showing CPU/GPU usage, processing times, FPS, and detected face/eye counts
-void drawBenchmarkHUD(Mat &img, bool useGpu, double cpuUsage, double gpuUsage, double preprocessMs,
-                      double gpuKernelMs, double detectionMs, double drawBoxesMs, double totalComputeMs,
-                      double processingFps, double videoFps, int faceCount, int eyeCount) {
+// draws a display on the video frame showing CPU/GPU usage, processing times, FPS, and detected face/eye counts
+void drawBenchmarkOverlay(Mat &img, bool useGpu, double cpuUsage, double gpuUsage, double preprocessMs, double gpuKernelMs, double detectionMs, double drawBoxesMs, double totalComputeMs, double processingFps, double videoFps, int faceCount, int eyeCount) {
   vector<string> lines;
   stringstream ss;
 
@@ -428,8 +425,10 @@ void drawBenchmarkHUD(Mat &img, bool useGpu, double cpuUsage, double gpuUsage, d
   ss.str("");
   ss.clear();
   ss << fixed << setprecision(1) << "CPU: " << cpuUsage << "% | GPU: ";
-  if (gpuUsage >= 0.0) ss << gpuUsage << "%";
-  else ss << "N/A";
+  if (gpuUsage >= 0.0)
+    ss << gpuUsage << "%";
+  else
+    ss << "N/A";
   lines.push_back(ss.str());
 
   // Display preprocessing time and GPU kernel execution time if using GPU
@@ -498,9 +497,7 @@ void drawBenchmarkHUD(Mat &img, bool useGpu, double cpuUsage, double gpuUsage, d
 
   // Draw a semi-transparent rectangle for the HUD background and overlay the text lines
   Rect hudRect(boxX, boxY, boxWidth, boxHeight);
-  if (hudRect.x >= 0 && hudRect.y >= 0 &&
-      hudRect.x + hudRect.width <= img.cols &&
-      hudRect.y + hudRect.height <= img.rows) {
+  if (hudRect.x >= 0 && hudRect.y >= 0 && hudRect.x + hudRect.width <= img.cols && hudRect.y + hudRect.height <= img.rows) {
     Mat roi = img(hudRect);
     Mat overlay;
     roi.copyTo(overlay);
@@ -523,8 +520,9 @@ bool sendAll(int socketFd, const void *data, size_t length) {
   const char *buffer = static_cast<const char *>(data);
 
   while (length > 0) {
-    ssize_t sent = send(socketFd, buffer, length, MSG_NOSIGNAL);
-    if (sent <= 0) return false;
+    ssize_t sent = send(socketFd, buffer, length, MSG_NOSIGNAL); // If client disconnected, don't terminate my entire program.
+    if (sent <= 0)
+      return false;
     buffer += sent;
     length -= static_cast<size_t>(sent);
   }
@@ -532,7 +530,7 @@ bool sendAll(int socketFd, const void *data, size_t length) {
   return true;
 }
 
-// Main Execution 
+// Main Execution
 int main(int argc, char *argv[]) {
   // bind signal handlers for graceful shutdown on SIGINT and SIGTERM
   signal(SIGINT, signalHandler);
@@ -596,12 +594,11 @@ int main(int argc, char *argv[]) {
   }
 
   // configure GStreamer pipeline to capture video from the Qualcomm RB3 camera, converting it to BGR format for OpenCV processing
-  string inputPipeline =
-      "qtiqmmfsrc camera=0 ! "
-      "video/x-raw,format=NV12,width=1280,height=720,framerate=30/1 ! "
-      "videoconvert ! "
-      "video/x-raw,format=BGR ! "
-      "appsink drop=true sync=false";
+  string inputPipeline = "qtiqmmfsrc camera=0 ! "
+                         "video/x-raw,format=NV12,width=1280,height=720,framerate=30/1 ! "
+                         "videoconvert ! "
+                         "video/x-raw,format=BGR ! "
+                         "appsink drop=true sync=false";
 
   // open the camera using OpenCV's VideoCapture with the GStreamer pipeline
   VideoCapture cap(inputPipeline, CAP_GSTREAMER);
@@ -617,8 +614,7 @@ int main(int argc, char *argv[]) {
   string cascadePath = "/usr/share/opencv4/haarcascades/";
 
   // load the Haar Cascade XML files for face and eye detection
-  if (!faceCascade.load(cascadePath + "haarcascade_frontalface_default.xml") ||
-      !eyeCascade.load(cascadePath + "haarcascade_eye.xml")) {
+  if (!faceCascade.load(cascadePath + "haarcascade_frontalface_default.xml") || !eyeCascade.load(cascadePath + "haarcascade_eye.xml")) {
     cerr << "Could not load cascade classifiers\n";
     return 1;
   }
@@ -645,7 +641,7 @@ int main(int argc, char *argv[]) {
     cerr << "Failed to initialize OpenCL GPU pipeline\n";
     return 1;
   }
-  cout << "OpenCL GPU pipeline initialized (Preprocess + GPU Box Drawing)\n";
+  cout << "OpenCL GPU pipeline initialized (Downsample and greyscale + GPU Box Drawing)\n";
 
   // create a TCP server socket to stream the processed video frames over HTTP
   int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -663,9 +659,12 @@ int main(int argc, char *argv[]) {
   sockaddr_in serverAddress{};
   serverAddress.sin_family = AF_INET;
   serverAddress.sin_port = htons(port);
-  if (serverIp == "localhost") serverAddress.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  else if (serverIp == "0.0.0.0") serverAddress.sin_addr.s_addr = htonl(INADDR_ANY);
-  else inet_pton(AF_INET, serverIp.c_str(), &serverAddress.sin_addr);
+  if (serverIp == "localhost")
+    serverAddress.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  else if (serverIp == "0.0.0.0")
+    serverAddress.sin_addr.s_addr = htonl(INADDR_ANY);
+  else
+    inet_pton(AF_INET, serverIp.c_str(), &serverAddress.sin_addr);
 
   // retry binding the server socket if the port is already in use, waiting 1 second between attempts
   while (running && bind(serverSocket, reinterpret_cast<sockaddr *>(&serverAddress), sizeof(serverAddress)) < 0) {
@@ -690,7 +689,6 @@ int main(int argc, char *argv[]) {
 
   cout << "\nVideo available at:\n";
   cout << "http://" << serverIp << ":" << port << "\n";
-  cout << "Camera will continue running whether or not a viewer is connected.\n";
 
   // set the server socket to non-blocking mode so that accept() does not block the main processing loop
   int serverFlags = fcntl(serverSocket, F_GETFL, 0);
@@ -703,14 +701,13 @@ int main(int argc, char *argv[]) {
 
   int clientSocket = -1;
 
-  // define the HTTP response header for streaming multipart JPEG frames to the client
-  const string httpHeader =
-      "HTTP/1.1 200 OK\r\n"
-      "Cache-Control: no-cache, no-store, must-revalidate\r\n"
-      "Pragma: no-cache\r\n"
-      "Expires: 0\r\n"
-      "Connection: close\r\n"
-      "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
+  // response header for streaming multipart JPEG frames to the client browser
+  const string httpHeader = "HTTP/1.1 200 OK\r\n"
+                            "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                            "Pragma: no-cache\r\n"
+                            "Expires: 0\r\n"
+                            "Connection: close\r\n"
+                            "Content-Type: multipart/x-mixed-replace; boundary=frame\r\n\r\n";
 
   // allocate OpenCV matrices for grayscale conversion and downscaled image
   Mat gray;
@@ -777,9 +774,10 @@ int main(int argc, char *argv[]) {
         }
       }
     }
-    
+
     // Capture a frame from the camera
-    if (!running) break;
+    if (!running)
+      break;
 
     // read a frame from the camera and check for errors
     if (!cap.read(frame) || frame.empty()) {
@@ -807,10 +805,10 @@ int main(int argc, char *argv[]) {
     } else {
       currentPreprocessMs = processCpu(frame, gray, smallGray, smallWidth, smallHeight);
     }
-    // Face Detection 
+    // Face Detection
     vector<Rect> faces;
     auto faceDetectStart = high_resolution_clock::now();
-    
+
     // Use OpenCV's detectMultiScale for face detection, leveraging GPU acceleration if available and enabled
     if (useGpu && oclAvailable) {
       // GPU Mode: UMat container routes detection directly to the Adreno GPU
@@ -830,8 +828,8 @@ int main(int argc, char *argv[]) {
     currentEyeCount = 0;
     currentDrawBoxesMs = 0.0;
 
-    // Pack bounding box data for GPU drawing. Each box has 8 integers representing x, y, width, height, valid flag, B, G, R
-    int gpuBoxData[40] = {0};
+    // Pack bounding box data for GPU drawing. Each box has 8 integers representing [x, y, width, height, valid flag, B, G, R]
+    int gpuBoxData[40] = {0}; // 5 boxes * 8 values each
     int boxIndex = 0;
 
     // Prepare labels for drawing on the frame
@@ -839,21 +837,19 @@ int main(int argc, char *argv[]) {
 
     // Iterate over detected faces and perform eye detection within each face region
     for (const Rect &smallFace : faces) {
-      Rect face(cvRound(smallFace.x * invScale),
-                cvRound(smallFace.y * invScale),
-                cvRound(smallFace.width * invScale),
-                cvRound(smallFace.height * invScale));
+      Rect face(cvRound(smallFace.x * invScale), cvRound(smallFace.y * invScale), cvRound(smallFace.width * invScale), cvRound(smallFace.height * invScale));
 
       // Ensure the face rectangle is within the bounds of the original frame
       face &= Rect(0, 0, frame.cols, frame.rows);
-      if (face.width <= 0 || face.height <= 0) continue;
+      if (face.width <= 0 || face.height <= 0)
+        continue;
 
       // face bounding box data for GPU drawing
       gpuBoxData[0] = face.x;
       gpuBoxData[1] = face.y;
       gpuBoxData[2] = face.width;
       gpuBoxData[3] = face.height;
-      gpuBoxData[4] = 1; // Valid
+      gpuBoxData[4] = 1;   // Valid
       gpuBoxData[5] = 0;   // B
       gpuBoxData[6] = 0;   // G
       gpuBoxData[7] = 255; // R
@@ -862,7 +858,7 @@ int main(int argc, char *argv[]) {
       // Eye Detection within the detected face region
       vector<Rect> eyes;
       auto eyeDetectStart = high_resolution_clock::now();
-      
+
       // Use OpenCV's detectMultiScale for eye detection, leveraging GPU acceleration if available and enabled
       if (useGpu && oclAvailable) {
         // Eye detection on GPU via OpenCV OpenCL UMat
@@ -881,13 +877,11 @@ int main(int argc, char *argv[]) {
 
       // Iterate over detected eyes and prepare bounding box data for GPU drawing
       for (const Rect &smallEye : eyes) {
-        Rect eyeGlobal(cvRound((smallFace.x + smallEye.x) * invScale),
-                       cvRound((smallFace.y + smallEye.y) * invScale),
-                       cvRound(smallEye.width * invScale),
-                       cvRound(smallEye.height * invScale));
+        Rect eyeGlobal(cvRound((smallFace.x + smallEye.x) * invScale), cvRound((smallFace.y + smallEye.y) * invScale), cvRound(smallEye.width * invScale), cvRound(smallEye.height * invScale));
 
         eyeGlobal &= Rect(0, 0, frame.cols, frame.rows);
-        if (eyeGlobal.width <= 0 || eyeGlobal.height <= 0) continue;
+        if (eyeGlobal.width <= 0 || eyeGlobal.height <= 0)
+          continue;
 
         // Determine if the detected eye is the right or left eye based on its position relative to the face center
         double eyeCenterX = smallEye.x + smallEye.width * 0.5;
@@ -895,13 +889,13 @@ int main(int argc, char *argv[]) {
         bool isRightEye = (eyeCenterX < faceCenterX);
         string eyeLabel = isRightEye ? "R Eye" : "L Eye";
 
-        // eye bounding box data for GPU drawing 
+        // eye bounding box data for GPU drawing
         int eyeSlot = isRightEye ? 1 : 2;
         gpuBoxData[eyeSlot * 8 + 0] = eyeGlobal.x;
         gpuBoxData[eyeSlot * 8 + 1] = eyeGlobal.y;
         gpuBoxData[eyeSlot * 8 + 2] = eyeGlobal.width;
         gpuBoxData[eyeSlot * 8 + 3] = eyeGlobal.height;
-        gpuBoxData[eyeSlot * 8 + 4] = 1; // Valid
+        gpuBoxData[eyeSlot * 8 + 4] = 1;   // Valid
         gpuBoxData[eyeSlot * 8 + 5] = 0;   // B
         gpuBoxData[eyeSlot * 8 + 6] = 255; // G
         gpuBoxData[eyeSlot * 8 + 7] = 0;   // R
@@ -922,7 +916,7 @@ int main(int argc, char *argv[]) {
 
         // Clip ear rectangles to ensure they are within the frame boundaries
         rightEarRect &= Rect(0, 0, frame.cols, frame.rows);
-        leftEarRect  &= Rect(0, 0, frame.cols, frame.rows);
+        leftEarRect &= Rect(0, 0, frame.cols, frame.rows);
 
         // Prepare bounding box data for detected ears for GPU drawing
         if (rightEarRect.width > 0 && rightEarRect.height > 0) {
@@ -970,8 +964,7 @@ int main(int argc, char *argv[]) {
 
     // Overlay text labels on each box
     for (const auto &lbl : labelsToDraw) {
-      Scalar txtCol = (lbl.first.find("Ear") != string::npos) ? (lbl.first == "R Ear" ? Scalar(255, 255, 0) : Scalar(255, 0, 0))
-                    : (lbl.first.find("Eye") != string::npos) ? Scalar(0, 255, 0) : Scalar(0, 0, 255);
+      Scalar txtCol = (lbl.first.find("Ear") != string::npos) ? (lbl.first == "R Ear" ? Scalar(255, 255, 0) : Scalar(255, 0, 0)) : (lbl.first.find("Eye") != string::npos) ? Scalar(0, 255, 0) : Scalar(0, 0, 255);
       putText(frame, lbl.first, lbl.second, FONT_HERSHEY_SIMPLEX, 0.45, txtCol, 1, LINE_AA);
     }
 
@@ -1006,10 +999,11 @@ int main(int argc, char *argv[]) {
       lastBenchmarkTime = now;
 
       // Log benchmark metrics to the benchmark log file
-      benchmarkLog << fixed << setprecision(1) << "\n[" << (useGpu ? "GPU (OpenCV API + GPU Draw)" : "CPU")
-                   << "] Video: " << currentVideoFps << " FPS | CPU: " << currentCpuPct << "% | GPU: ";
-      if (currentGpuPct >= 0.0) benchmarkLog << currentGpuPct << "%\n";
-      else benchmarkLog << "N/A\n";
+      benchmarkLog << fixed << setprecision(1) << "\n[" << (useGpu ? "GPU (OpenCV API + GPU Draw)" : "CPU") << "] Video: " << currentVideoFps << " FPS | CPU: " << currentCpuPct << "% | GPU: ";
+      if (currentGpuPct >= 0.0)
+        benchmarkLog << currentGpuPct << "%\n";
+      else
+        benchmarkLog << "N/A\n";
 
       // Log preprocessing time and GPU kernel execution time if using GPU
       benchmarkLog << setprecision(2);
@@ -1027,15 +1021,12 @@ int main(int argc, char *argv[]) {
                    << " | " << setprecision(1) << currentDetectionFps << " detect FPS\n"
                    << setprecision(2) << "  Compute    : " << currentTotalComputeMs << " ms/frame"
                    << " | " << setprecision(1) << currentProcessingFps << " processing FPS\n"
-                   << "  Detected   : " << currentFaceCount << (currentFaceCount == 1 ? " face" : " faces")
-                   << " | " << currentEyeCount << (currentEyeCount == 1 ? " eye" : " eyes") << "\n";
+                   << "  Detected   : " << currentFaceCount << (currentFaceCount == 1 ? " face" : " faces") << " | " << currentEyeCount << (currentEyeCount == 1 ? " eye" : " eyes") << "\n";
       benchmarkLog.flush();
     }
 
-    // Heads-Up Display
-    drawBenchmarkHUD(frame, useGpu, currentCpuPct, currentGpuPct, currentPreprocessMs,
-                     currentGpuKernelMs, currentDetectionMs, currentDrawBoxesMs, currentTotalComputeMs,
-                     currentProcessingFps, currentVideoFps, currentFaceCount, currentEyeCount);
+    // Overlay top corner display
+    drawBenchmarkOverlay(frame, useGpu, currentCpuPct, currentGpuPct, currentPreprocessMs, currentGpuKernelMs, currentDetectionMs, currentDrawBoxesMs, currentTotalComputeMs, currentProcessingFps, currentVideoFps, currentFaceCount, currentEyeCount);
 
     // Non-blocking Client Stream Handler
     if (clientSocket < 0) {
@@ -1045,7 +1036,8 @@ int main(int argc, char *argv[]) {
       if (newClientSocket >= 0) {
         // Set the new client socket to non-blocking mode to avoid blocking the main loop during send operations
         int clientFlags = fcntl(newClientSocket, F_GETFL, 0);
-        if (clientFlags >= 0) fcntl(newClientSocket, F_SETFL, clientFlags | O_NONBLOCK);
+        if (clientFlags >= 0)
+          fcntl(newClientSocket, F_SETFL, clientFlags | O_NONBLOCK);
         if (!sendAll(newClientSocket, httpHeader.data(), httpHeader.size())) {
           close(newClientSocket);
         } else {
@@ -1072,12 +1064,9 @@ int main(int argc, char *argv[]) {
     }
 
     // Prepare the multipart HTTP frame header with the appropriate content length for the JPEG image
-    string frameHeader = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " +
-                         to_string(jpeg.size()) + "\r\n\r\n";
+    string frameHeader = "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + to_string(jpeg.size()) + "\r\n\r\n";
 
-    if (!sendAll(clientSocket, frameHeader.data(), frameHeader.size()) ||
-        !sendAll(clientSocket, jpeg.data(), jpeg.size()) ||
-        !sendAll(clientSocket, "\r\n", 2)) {
+    if (!sendAll(clientSocket, frameHeader.data(), frameHeader.size()) || !sendAll(clientSocket, jpeg.data(), jpeg.size()) || !sendAll(clientSocket, "\r\n", 2)) {
       cerr << "Viewer disconnected\n";
       close(clientSocket);
       clientSocket = -1;
@@ -1090,7 +1079,8 @@ int main(int argc, char *argv[]) {
 
   // Final benchmark summary output
   auto printSummary = [](ostream &out, const string &label, const BenchmarkStats &stats, bool gpuMode) {
-    if (stats.samples == 0) return;
+    if (stats.samples == 0)
+      return;
     double sampleCount = static_cast<double>(stats.samples);
     double avgVideoFps = stats.videoFpsSum / sampleCount;
     double avgPreprocessMs = stats.preprocessMsSum / sampleCount;
@@ -1106,9 +1096,7 @@ int main(int argc, char *argv[]) {
     double avgEyes = static_cast<double>(stats.eyesDetected) / sampleCount;
 
     // Output the benchmark summary for the specified mode (CPU or GPU) with average metrics
-    out << "\n---------------- " << label << " ----------------\n"
-        << fixed << setprecision(2)
-        << "Average preprocess      : " << avgPreprocessMs << " ms\n";
+    out << "\n---------------- " << label << " ----------------\n" << fixed << setprecision(2) << "Average preprocess      : " << avgPreprocessMs << " ms\n";
     if (gpuMode) {
       out << "Average GPU kernel      : " << avgKernelMs << " ms\n"
           << "Average GPU box draw    : " << avgDrawBoxesMs << " ms\n";
@@ -1133,8 +1121,10 @@ int main(int argc, char *argv[]) {
     double avgGpuTotal = gpuStats.totalComputeMsSum / static_cast<double>(gpuStats.samples);
 
     benchmarkLog << "\n---------------- SPEEDUP ----------------\n" << fixed << setprecision(2);
-    if (avgGpuPreprocess > 0.0) benchmarkLog << "Preprocessing speedup   : " << avgCpuPreprocess / avgGpuPreprocess << "x\n";
-    if (avgGpuTotal > 0.0) benchmarkLog << "Full compute speedup    : " << avgCpuTotal / avgGpuTotal << "x\n";
+    if (avgGpuPreprocess > 0.0)
+      benchmarkLog << "Preprocessing speedup   : " << avgCpuPreprocess / avgGpuPreprocess << "x\n";
+    if (avgGpuTotal > 0.0)
+      benchmarkLog << "Full compute speedup    : " << avgCpuTotal / avgGpuTotal << "x\n";
   }
 
   benchmarkLog << "=========================================================\n";
@@ -1143,7 +1133,8 @@ int main(int argc, char *argv[]) {
   cout << "\nBenchmark complete. Results saved to benchmark.log\n";
 
   // Cleanup resources and restore terminal settings before exiting
-  if (clientSocket >= 0) close(clientSocket);
+  if (clientSocket >= 0)
+    close(clientSocket);
   close(serverSocket);
   cap.release();
   cleanupOpenCL(ocl);

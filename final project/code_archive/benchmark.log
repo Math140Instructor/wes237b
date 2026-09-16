@@ -1,0 +1,63 @@
+=================================== BENCHMARK MONITOR ===================================
+Pipeline: GPU grayscale/downscale + CPU face/eye detection + CPU ear estimation/drawing
+Recording duration: 20 seconds
+-----------------------------------------------------------------------------------------
+[Benchmark]  0s | CPU:47.3% | GPU:  0% | GPU-Kernel:  0.50ms | CPU-Face: 39.59ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 39.59ms
+[Benchmark]  1s | CPU:49.5% | GPU:  0% | GPU-Kernel:  0.47ms | CPU-Face: 23.09ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 23.09ms
+[Benchmark]  1s | CPU:47.7% | GPU:  1% | GPU-Kernel:  0.49ms | CPU-Face: 28.93ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 28.93ms
+[Benchmark]  2s | CPU:50.0% | GPU:  1% | GPU-Kernel:  0.48ms | CPU-Face: 25.79ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 25.79ms
+[Benchmark]  2s | CPU:49.0% | GPU:  1% | GPU-Kernel:  0.46ms | CPU-Face: 25.78ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 25.78ms
+[Benchmark]  3s | CPU:49.6% | GPU:  1% | GPU-Kernel:  0.47ms | CPU-Face: 30.92ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 30.92ms
+[Benchmark]  3s | CPU:49.7% | GPU:  1% | GPU-Kernel:  0.65ms | CPU-Face: 26.63ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 26.63ms
+[Benchmark]  4s | CPU:48.1% | GPU:  1% | GPU-Kernel:  0.46ms | CPU-Face: 23.98ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 23.98ms
+[Benchmark]  4s | CPU:47.2% | GPU:  1% | GPU-Kernel:  0.48ms | CPU-Face: 26.42ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 26.42ms
+[Benchmark]  5s | CPU:51.4% | GPU:  1% | GPU-Kernel:  0.48ms | CPU-Face: 28.24ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 28.24ms
+[Benchmark]  5s | CPU:49.6% | GPU:  1% | GPU-Kernel:  0.51ms | CPU-Face: 22.70ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 22.70ms
+[Benchmark]  6s | CPU:50.4% | GPU:  1% | GPU-Kernel:  0.49ms | CPU-Face: 27.53ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 27.53ms
+[Benchmark]  6s | CPU:51.2% | GPU:  1% | GPU-Kernel:  0.52ms | CPU-Face: 27.58ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 27.58ms
+[Benchmark]  7s | CPU:52.2% | GPU:  1% | GPU-Kernel:  0.52ms | CPU-Face: 19.13ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 19.13ms
+[Benchmark]  7s | CPU:49.6% | GPU:  1% | GPU-Kernel:  0.47ms | CPU-Face: 22.79ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 22.79ms
+[Benchmark]  8s | CPU:51.2% | GPU:  1% | GPU-Kernel:  0.50ms | CPU-Face: 30.74ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 30.74ms
+[Benchmark]  8s | CPU:53.1% | GPU:  1% | GPU-Kernel:  0.50ms | CPU-Face: 24.46ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 24.46ms
+[Benchmark]  9s | CPU:54.4% | GPU:  1% | GPU-Kernel:  0.46ms | CPU-Face: 26.03ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 26.03ms
+[Benchmark]  9s | CPU:53.3% | GPU:  1% | GPU-Kernel:  0.49ms | CPU-Face: 23.88ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 23.88ms
+[Benchmark] 10s | CPU:50.6% | GPU:  1% | GPU-Kernel:  0.49ms | CPU-Face: 29.87ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 29.87ms
+[Benchmark] 10s | CPU:51.5% | GPU:  1% | GPU-Kernel:  0.47ms | CPU-Face: 19.87ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 19.87ms
+[Benchmark] 11s | CPU:50.6% | GPU:  1% | GPU-Kernel:  0.54ms | CPU-Face: 29.89ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 29.89ms
+[Benchmark] 11s | CPU:52.6% | GPU:  1% | GPU-Kernel:  0.50ms | CPU-Face: 22.81ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 22.81ms
+[Benchmark] 12s | CPU:50.4% | GPU:  1% | GPU-Kernel:  0.48ms | CPU-Face: 26.26ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 26.26ms
+[Benchmark] 12s | CPU:50.8% | GPU:  1% | GPU-Kernel:  0.48ms | CPU-Face: 21.68ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 21.68ms
+[Benchmark] 13s | CPU:51.0% | GPU:  1% | GPU-Kernel:  0.47ms | CPU-Face: 24.59ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 24.59ms
+[Benchmark] 13s | CPU:50.7% | GPU:  1% | GPU-Kernel:  0.48ms | CPU-Face: 20.58ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 20.58ms
+[Benchmark] 14s | CPU:50.5% | GPU:  1% | GPU-Kernel:  0.61ms | CPU-Face: 22.68ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 22.68ms
+[Benchmark] 14s | CPU:50.6% | GPU:  1% | GPU-Kernel:  0.48ms | CPU-Face: 22.47ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 22.47ms
+[Benchmark] 15s | CPU:48.1% | GPU:  1% | GPU-Kernel:  0.50ms | CPU-Face: 24.68ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 24.68ms
+[Benchmark] 15s | CPU:52.0% | GPU:  1% | GPU-Kernel:  0.48ms | CPU-Face: 23.16ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 23.16ms
+[Benchmark] 16s | CPU:50.4% | GPU:  1% | GPU-Kernel:  0.55ms | CPU-Face: 23.74ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 23.74ms
+[Benchmark] 17s | CPU:48.5% | GPU:  1% | GPU-Kernel:  0.50ms | CPU-Face: 25.84ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 25.84ms
+[Benchmark] 17s | CPU:54.2% | GPU:  1% | GPU-Kernel:  0.48ms | CPU-Face: 26.76ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 26.76ms
+[Benchmark] 18s | CPU:52.0% | GPU:  1% | GPU-Kernel:  0.48ms | CPU-Face: 22.63ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 22.63ms
+[Benchmark] 18s | CPU:51.3% | GPU:  1% | GPU-Kernel:  0.47ms | CPU-Face: 21.33ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 21.33ms
+[Benchmark] 19s | CPU:49.4% | GPU:  1% | GPU-Kernel:  0.47ms | CPU-Face: 20.42ms | CPU-Eye:  0.00ms | CPU-Ear:  0.00ms | CPU-Draw:  0.00ms | CPU-Total: 20.42ms
+[Benchmark] 19s | CPU:53.6% | GPU:  1% | GPU-Kernel:  0.48ms | CPU-Face: 26.23ms | CPU-Eye:  0.95ms | CPU-Ear:  0.00ms | CPU-Draw:  0.06ms | CPU-Total: 27.24ms
+
+=================================== FINAL BENCHMARK SUMMARY ===================================
+Program runtime                    : 20.01 s
+Observed video throughput          : 29.63 FPS
+-----------------------------------------------------------------------------------------------
+AVERAGE PER-FRAME LATENCIES:
+  GPU preprocessing kernel         :     0.49 ms/frame
+  CPU face detection               :    25.29 ms/frame
+  CPU eye detection                :     0.01 ms/frame
+  CPU ear estimation               :     0.00 ms/frame
+  CPU drawing/annotation           :     0.00 ms/frame
+  CPU total measured work          :    25.30 ms/frame
+-----------------------------------------------------------------------------------------------
+CUMULATIVE MEASURED STAGE TIMES:
+  GPU preprocessing kernel         :   293.35 ms
+  CPU face detection               : 14994.27 ms
+  CPU eye detection                :     6.11 ms
+  CPU ear estimation               :     0.00 ms
+  CPU drawing/annotation           :     0.48 ms
+  CPU total measured work          : 15000.86 ms
+===============================================================================================
