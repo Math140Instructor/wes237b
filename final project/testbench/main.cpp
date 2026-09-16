@@ -17,21 +17,17 @@ using namespace cv;
 using namespace std;
 using namespace std::chrono;
 
-// ============================================================
 // Test-bench configuration
-// ============================================================
 
-static const int RECORD_SECONDS = 20;
+static int RECORD_SECONDS = 10; // default
 static const int TARGET_CAMERA_FPS = 30;
 static const int WARMUP_FRAMES = 30;
-static const int COOLDOWN_SECONDS = 2;
+// static const int COOLDOWN_SECONDS = 0;
 static const char *BENCHMARK_LOG = "benchmark.log";
 static const char *PRIMARY_INPUT_VIDEO = "test_input.mp4";
-static const char *FALLBACK_INPUT_VIDEO = "test_input.avi";
+static VideoCapture *g_camera = nullptr;
 
-// ============================================================
 // OpenCL context
-// ============================================================
 
 struct OpenCLContext {
   cl_platform_id platform = nullptr;
@@ -44,15 +40,12 @@ struct OpenCLContext {
   cl_mem d_dst = nullptr;
 };
 
-// ============================================================
-// CPU / GPU utilization helpers
-// ============================================================
-
+// CPU usage
 struct CpuSnapshot {
-  unsigned long long totalUser = 0;
-  unsigned long long totalUserLow = 0;
-  unsigned long long totalSys = 0;
-  unsigned long long totalIdle = 0;
+  unsigned long long totalUser = 0;    // CPU time spent running normal user programs
+  unsigned long long totalUserLow = 0; // CPU time spent running lower-priority user programs
+  unsigned long long totalSys = 0;     // CPU time spent inside the Linux kernel doing system-level work
+  unsigned long long totalIdle = 0;    // CPU idle time
 };
 
 CpuSnapshot readCpuSnapshot() {
@@ -70,10 +63,8 @@ CpuSnapshot readCpuSnapshot() {
 }
 
 double calculateCpuUsage(const CpuSnapshot &prev, const CpuSnapshot &curr) {
-  unsigned long long prevTotal =
-      prev.totalUser + prev.totalUserLow + prev.totalSys + prev.totalIdle;
-  unsigned long long currTotal =
-      curr.totalUser + curr.totalUserLow + curr.totalSys + curr.totalIdle;
+  unsigned long long prevTotal = prev.totalUser + prev.totalUserLow + prev.totalSys + prev.totalIdle;
+  unsigned long long currTotal = curr.totalUser + curr.totalUserLow + curr.totalSys + curr.totalIdle;
 
   unsigned long long totalDelta = currTotal - prevTotal;
   unsigned long long idleDelta = curr.totalIdle - prev.totalIdle;
@@ -82,9 +73,7 @@ double calculateCpuUsage(const CpuSnapshot &prev, const CpuSnapshot &curr) {
     return 0.0;
   }
 
-  return (1.0 - static_cast<double>(idleDelta) /
-                    static_cast<double>(totalDelta)) *
-         100.0;
+  return (1.0 - static_cast<double>(idleDelta) / static_cast<double>(totalDelta)) * 100.0;
 }
 
 double readGpuUsage() {
@@ -96,8 +85,7 @@ double readGpuUsage() {
     gpubusyFile >> busyCycles >> totalCycles;
 
     if (totalCycles > 0) {
-      return static_cast<double>(busyCycles) /
-             static_cast<double>(totalCycles) * 100.0;
+      return static_cast<double>(busyCycles) / static_cast<double>(totalCycles) * 100.0;
     }
   }
 
@@ -112,14 +100,7 @@ double readGpuUsage() {
   return -1.0;
 }
 
-// ============================================================
-// OpenCL setup / cleanup
-// ============================================================
-
-bool initOpenCL(OpenCLContext &ocl,
-                const string &kernelFile,
-                int width,
-                int height) {
+bool initOpenCL(OpenCLContext &ocl, const string &kernelFile, int width, int height) {
   cl_int err = CL_SUCCESS;
   cl_uint numPlatforms = 0;
 
@@ -129,36 +110,21 @@ bool initOpenCL(OpenCLContext &ocl,
     return false;
   }
 
-  err = clGetDeviceIDs(
-      ocl.platform,
-      CL_DEVICE_TYPE_GPU,
-      1,
-      &ocl.device,
-      nullptr);
+  err = clGetDeviceIDs(ocl.platform, CL_DEVICE_TYPE_GPU, 1, &ocl.device, nullptr);
 
   if (err != CL_SUCCESS) {
     cerr << "Could not find GPU OpenCL device\n";
     return false;
   }
 
-  ocl.context = clCreateContext(
-      nullptr,
-      1,
-      &ocl.device,
-      nullptr,
-      nullptr,
-      &err);
+  ocl.context = clCreateContext(nullptr, 1, &ocl.device, nullptr, nullptr, &err);
 
   if (err != CL_SUCCESS) {
     cerr << "Could not create OpenCL context\n";
     return false;
   }
 
-  ocl.queue = clCreateCommandQueue(
-      ocl.context,
-      ocl.device,
-      CL_QUEUE_PROFILING_ENABLE,
-      &err);
+  ocl.queue = clCreateCommandQueue(ocl.context, ocl.device, CL_QUEUE_PROFILING_ENABLE, &err);
 
   if (err != CL_SUCCESS) {
     cerr << "Could not create OpenCL command queue\n";
@@ -171,92 +137,49 @@ bool initOpenCL(OpenCLContext &ocl,
     return false;
   }
 
-  string srcStr(
-      (istreambuf_iterator<char>(file)),
-      istreambuf_iterator<char>());
+  string srcStr((istreambuf_iterator<char>(file)), istreambuf_iterator<char>());
 
   const char *src = srcStr.c_str();
   size_t length = srcStr.length();
 
-  ocl.program = clCreateProgramWithSource(
-      ocl.context,
-      1,
-      &src,
-      &length,
-      &err);
+  ocl.program = clCreateProgramWithSource(ocl.context, 1, &src, &length, &err);
 
   if (err != CL_SUCCESS) {
     cerr << "Could not create OpenCL program\n";
     return false;
   }
 
-  err = clBuildProgram(
-      ocl.program,
-      1,
-      &ocl.device,
-      "-cl-fast-relaxed-math",
-      nullptr,
-      nullptr);
+  err = clBuildProgram(ocl.program, 1, &ocl.device, "-cl-fast-relaxed-math", nullptr, nullptr);
 
   if (err != CL_SUCCESS) {
     size_t logSize = 0;
-    clGetProgramBuildInfo(
-        ocl.program,
-        ocl.device,
-        CL_PROGRAM_BUILD_LOG,
-        0,
-        nullptr,
-        &logSize);
+    clGetProgramBuildInfo(ocl.program, ocl.device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &logSize);
 
     vector<char> log(logSize);
-    clGetProgramBuildInfo(
-        ocl.program,
-        ocl.device,
-        CL_PROGRAM_BUILD_LOG,
-        logSize,
-        log.data(),
-        nullptr);
+    clGetProgramBuildInfo(ocl.program, ocl.device, CL_PROGRAM_BUILD_LOG, logSize, log.data(), nullptr);
 
     cerr << "OpenCL Build Error:\n" << log.data() << "\n";
     return false;
   }
 
-  ocl.kernel = clCreateKernel(
-      ocl.program,
-      "bgr_to_gray_downscale_2x",
-      &err);
+  ocl.kernel = clCreateKernel(ocl.program, "bgr_to_gray_downscale_2x", &err);
 
   if (err != CL_SUCCESS) {
     cerr << "Could not create OpenCL kernel\n";
     return false;
   }
 
-  size_t srcBytes =
-      static_cast<size_t>(width) *
-      static_cast<size_t>(height) * 3;
+  size_t srcBytes = static_cast<size_t>(width) * static_cast<size_t>(height) * 3;
+  size_t dstBytes = static_cast<size_t>(width / 2) * static_cast<size_t>(height / 2);
 
-  size_t dstBytes =
-      static_cast<size_t>(width / 2) *
-      static_cast<size_t>(height / 2);
-
-  ocl.d_src = clCreateBuffer(
-      ocl.context,
-      CL_MEM_READ_ONLY,
-      srcBytes,
-      nullptr,
-      &err);
+  ocl.d_src = clCreateBuffer(ocl.context, CL_MEM_READ_ONLY, srcBytes, nullptr, &err);
 
   if (err != CL_SUCCESS) {
     cerr << "Could not create OpenCL source buffer\n";
     return false;
   }
 
-  ocl.d_dst = clCreateBuffer(
-      ocl.context,
-      CL_MEM_WRITE_ONLY,
-      dstBytes,
-      nullptr,
-      &err);
+  ocl.d_dst = clCreateBuffer(ocl.context, CL_MEM_WRITE_ONLY, dstBytes, nullptr, &err);
 
   if (err != CL_SUCCESS) {
     cerr << "Could not create OpenCL destination buffer\n";
@@ -298,10 +221,6 @@ void cleanupOpenCL(OpenCLContext &ocl) {
   }
 }
 
-// ============================================================
-// Video recording
-// ============================================================
-
 struct RecordingInfo {
   string path;
   int width = 0;
@@ -311,23 +230,13 @@ struct RecordingInfo {
   double durationSec = 0.0;
 };
 
-bool openRecordingWriter(VideoWriter &writer,
-                         string &actualPath,
-                         int width,
-                         int height,
-                         double fps) {
-  string hwPipeline =
-      "appsrc ! videoconvert ! v4l2h264enc ! "
-      "video/x-h264,profile=baseline ! h264parse ! mp4mux ! "
-      "filesink location=" + string(PRIMARY_INPUT_VIDEO);
+bool openRecordingWriter(VideoWriter &writer, string &actualPath, int width, int height, double fps) {
+  string hwPipeline = "appsrc ! videoconvert ! v4l2h264enc ! "
+                      "video/x-h264,profile=baseline ! h264parse ! mp4mux ! "
+                      "filesink location=" +
+                      string(PRIMARY_INPUT_VIDEO);
 
-  writer.open(
-      hwPipeline,
-      CAP_GSTREAMER,
-      0,
-      fps,
-      Size(width, height),
-      true);
+  writer.open(hwPipeline, CAP_GSTREAMER, 0, fps, Size(width, height), true);
 
   if (writer.isOpened()) {
     actualPath = PRIMARY_INPUT_VIDEO;
@@ -336,35 +245,15 @@ bool openRecordingWriter(VideoWriter &writer,
 
   cerr << "Hardware H.264 recording failed; trying x264enc...\n";
 
-  string swPipeline =
-      "appsrc ! videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast ! "
-      "video/x-h264,profile=baseline ! h264parse ! mp4mux ! "
-      "filesink location=" + string(PRIMARY_INPUT_VIDEO);
+  string swPipeline = "appsrc ! videoconvert ! x264enc tune=zerolatency speed-preset=ultrafast ! "
+                      "video/x-h264,profile=baseline ! h264parse ! mp4mux ! "
+                      "filesink location=" +
+                      string(PRIMARY_INPUT_VIDEO);
 
-  writer.open(
-      swPipeline,
-      CAP_GSTREAMER,
-      0,
-      fps,
-      Size(width, height),
-      true);
+  writer.open(swPipeline, CAP_GSTREAMER, 0, fps, Size(width, height), true);
 
   if (writer.isOpened()) {
     actualPath = PRIMARY_INPUT_VIDEO;
-    return true;
-  }
-
-  cerr << "x264enc recording failed; trying MJPEG AVI fallback...\n";
-
-  writer.open(
-      FALLBACK_INPUT_VIDEO,
-      VideoWriter::fourcc('M', 'J', 'P', 'G'),
-      fps,
-      Size(width, height),
-      true);
-
-  if (writer.isOpened()) {
-    actualPath = FALLBACK_INPUT_VIDEO;
     return true;
   }
 
@@ -372,111 +261,111 @@ bool openRecordingWriter(VideoWriter &writer,
 }
 
 bool recordTestVideo(RecordingInfo &info) {
+
   cout << "\n================ PHASE 1: RECORD TEST VIDEO ================\n";
 
-  string inputPipeline =
-      "qtiqmmfsrc camera=0 ! "
-      "video/x-raw,format=NV12,width=1280,height=720,framerate=30/1 ! "
-      "videoconvert ! "
-      "video/x-raw,format=BGR ! "
-      "appsink drop=true sync=false";
+  string inputPipeline = "qtiqmmfsrc camera=0 ! "
+                         "video/x-raw,format=NV12,width=1280,height=720,framerate=30/1 ! "
+                         "videoconvert ! "
+                         "video/x-raw,format=BGR ! "
+                         "appsink drop=true max-buffers=1 sync=false";
 
-  VideoCapture cap(inputPipeline, CAP_GSTREAMER);
+  // IMPORTANT:
+  // Allocate the VideoCapture on the heap.
+  //
+  // Do NOT delete it and do NOT call release().
+  // The Qualcomm qtiqmmfsrc pipeline hangs during OpenCV teardown.
+  if (g_camera == nullptr) {
+    g_camera = new VideoCapture();
+  }
 
-  if (!cap.isOpened()) {
+  cout << "Opening RB3 camera..." << endl;
+
+  if (!g_camera->open(inputPipeline, CAP_GSTREAMER)) {
     cerr << "Could not open RB3 camera\n";
     return false;
   }
 
+  if (!g_camera->isOpened()) {
+    cerr << "RB3 camera is not open\n";
+    return false;
+  }
+
+  cout << "Camera opened." << endl;
+
   Mat frame;
-  if (!cap.read(frame) || frame.empty()) {
+
+  cout << "Waiting for first frame..." << endl;
+
+  if (!g_camera->read(frame) || frame.empty()) {
     cerr << "Could not read first camera frame\n";
     return false;
   }
+
+  cout << "First frame received: " << frame.cols << "x" << frame.rows << endl;
 
   info.width = frame.cols;
   info.height = frame.rows;
   info.fps = TARGET_CAMERA_FPS;
 
   VideoWriter writer;
-  if (!openRecordingWriter(
-          writer,
-          info.path,
-          info.width,
-          info.height,
-          info.fps)) {
-    cerr << "Could not create test video writer\n";
+
+  if (!openRecordingWriter(writer, info.path, info.width, info.height, info.fps)) {
+
+    cerr << "Could not create MP4 writer\n";
     return false;
   }
 
-  cout << "Recording " << RECORD_SECONDS << " seconds to " << info.path << "...\n";
-
-  auto start = steady_clock::now();
+  const int targetFrames = RECORD_SECONDS * TARGET_CAMERA_FPS;
+  cout << "Recording " << RECORD_SECONDS << " seconds (" << targetFrames << " frames) to " << info.path << "..." << endl;
   int frameCount = 0;
 
-  // Include the already captured first frame.
-  writer.write(frame);
-  frameCount++;
+  auto start = steady_clock::now();
 
-  while (duration_cast<seconds>(steady_clock::now() - start).count() < RECORD_SECONDS) {
-    if (!cap.read(frame) || frame.empty()) {
-      cerr << "Camera frame capture failed while recording\n";
+  while (frameCount < targetFrames) {
+    if (!g_camera->read(frame) || frame.empty()) {
+      cerr << "Camera capture failed at frame " << frameCount << endl;
       break;
     }
-
     writer.write(frame);
     frameCount++;
   }
 
   auto end = steady_clock::now();
 
-  writer.release();
-  cap.release();
-
   info.frames = frameCount;
   info.durationSec = duration_cast<milliseconds>(end - start).count() / 1000.0;
 
-  cout << "Recorded " << info.frames << " frames in "
-       << fixed << setprecision(2) << info.durationSec << " s\n";
-  cout << "Saved input video: " << info.path << "\n";
+  cout << "Captured " << frameCount << "/" << targetFrames << " frames." << endl;
+  cout << "Finalizing MP4..." << endl;
+  writer.release();
 
-  return info.frames > 0;
+  cout << "MP4 finalized." << endl;
+
+  if (frameCount != targetFrames) {
+    cerr << "Recording incomplete: expected " << targetFrames << " frames but captured " << frameCount << endl;
+    return false;
+  }
+
+  cout << "Recorded " << info.frames << " frames in " << RECORD_SECONDS << " s" << endl;
+  cout << "Saved input video: " << info.path << endl;
+  cout << "Recording phase complete." << endl;
+
+  return true;
 }
 
-// ============================================================
-// CPU and GPU preprocessing
-// ============================================================
-
-double processCpu(const Mat &frame,
-                  Mat &gray,
-                  Mat &smallGray,
-                  int smallWidth,
-                  int smallHeight) {
+double processCpu(const Mat &frame, Mat &gray, Mat &smallGray, int smallWidth, int smallHeight) {
   auto start = high_resolution_clock::now();
 
   cvtColor(frame, gray, COLOR_BGR2GRAY);
-  resize(
-      gray,
-      smallGray,
-      Size(smallWidth, smallHeight),
-      0,
-      0,
-      INTER_LINEAR);
+  resize(gray, smallGray, Size(smallWidth, smallHeight), 0, 0, INTER_LINEAR);
 
   auto end = high_resolution_clock::now();
 
   return duration_cast<microseconds>(end - start).count() / 1000.0;
 }
 
-bool processGpu(OpenCLContext &ocl,
-                const Mat &inputFrame,
-                Mat &smallGray,
-                int fullWidth,
-                int fullHeight,
-                int smallWidth,
-                int smallHeight,
-                double &kernelMs,
-                double &endToEndMs) {
+bool processGpu(OpenCLContext &ocl, const Mat &inputFrame, Mat &smallGray, int fullWidth, int fullHeight, int smallWidth, int smallHeight, double &kernelMs, double &endToEndMs) {
   Mat contiguousFrame;
   const Mat *framePtr = &inputFrame;
 
@@ -491,19 +380,9 @@ bool processGpu(OpenCLContext &ocl,
 
   cl_int err = CL_SUCCESS;
 
-  size_t sourceBytes =
-      static_cast<size_t>(fullHeight) * frame.step;
+  size_t sourceBytes = static_cast<size_t>(fullHeight) * frame.step;
 
-  err = clEnqueueWriteBuffer(
-      ocl.queue,
-      ocl.d_src,
-      CL_FALSE,
-      0,
-      sourceBytes,
-      frame.data,
-      0,
-      nullptr,
-      nullptr);
+  err = clEnqueueWriteBuffer(ocl.queue, ocl.d_src, CL_FALSE, 0, sourceBytes, frame.data, 0, nullptr, nullptr);
 
   if (err != CL_SUCCESS) {
     cerr << "clEnqueueWriteBuffer failed: " << err << "\n";
@@ -526,41 +405,20 @@ bool processGpu(OpenCLContext &ocl,
     return false;
   }
 
-  size_t globalWorkSize[2] = {
-      static_cast<size_t>(smallWidth),
-      static_cast<size_t>(smallHeight)};
+  size_t globalWorkSize[2] = {static_cast<size_t>(smallWidth), static_cast<size_t>(smallHeight)};
 
   size_t localWorkSize[2] = {16, 8};
 
   cl_event kernelEvent = nullptr;
 
-  err = clEnqueueNDRangeKernel(
-      ocl.queue,
-      ocl.kernel,
-      2,
-      nullptr,
-      globalWorkSize,
-      localWorkSize,
-      0,
-      nullptr,
-      &kernelEvent);
+  err = clEnqueueNDRangeKernel(ocl.queue, ocl.kernel, 2, nullptr, globalWorkSize, localWorkSize, 0, nullptr, &kernelEvent);
 
   if (err != CL_SUCCESS) {
     cerr << "clEnqueueNDRangeKernel failed: " << err << "\n";
     return false;
   }
 
-  err = clEnqueueReadBuffer(
-      ocl.queue,
-      ocl.d_dst,
-      CL_TRUE,
-      0,
-      static_cast<size_t>(smallWidth) *
-          static_cast<size_t>(smallHeight),
-      smallGray.data,
-      0,
-      nullptr,
-      nullptr);
+  err = clEnqueueReadBuffer(ocl.queue, ocl.d_dst, CL_TRUE, 0, static_cast<size_t>(smallWidth) * static_cast<size_t>(smallHeight), smallGray.data, 0, nullptr, nullptr);
 
   if (err != CL_SUCCESS) {
     cerr << "clEnqueueReadBuffer failed: " << err << "\n";
@@ -570,37 +428,20 @@ bool processGpu(OpenCLContext &ocl,
 
   auto gpuEnd = high_resolution_clock::now();
 
-  endToEndMs =
-      duration_cast<microseconds>(gpuEnd - gpuStart).count() / 1000.0;
+  endToEndMs = duration_cast<microseconds>(gpuEnd - gpuStart).count() / 1000.0;
 
   cl_ulong kernelStart = 0;
   cl_ulong kernelEnd = 0;
 
-  clGetEventProfilingInfo(
-      kernelEvent,
-      CL_PROFILING_COMMAND_START,
-      sizeof(kernelStart),
-      &kernelStart,
-      nullptr);
+  clGetEventProfilingInfo(kernelEvent, CL_PROFILING_COMMAND_START, sizeof(kernelStart), &kernelStart, nullptr);
+  clGetEventProfilingInfo(kernelEvent, CL_PROFILING_COMMAND_END, sizeof(kernelEnd), &kernelEnd, nullptr);
 
-  clGetEventProfilingInfo(
-      kernelEvent,
-      CL_PROFILING_COMMAND_END,
-      sizeof(kernelEnd),
-      &kernelEnd,
-      nullptr);
-
-  kernelMs =
-      static_cast<double>(kernelEnd - kernelStart) * 1e-6;
+  kernelMs = static_cast<double>(kernelEnd - kernelStart) * 1e-6;
 
   clReleaseEvent(kernelEvent);
 
   return true;
 }
-
-// ============================================================
-// Detection + annotation stages
-// ============================================================
 
 struct DetectionMetrics {
   double faceMs = 0.0;
@@ -611,29 +452,16 @@ struct DetectionMetrics {
   int eyeCount = 0;
 };
 
-DetectionMetrics runDetectionPipeline(
-    const Mat &smallGray,
-    Mat &displayFrame,
-    CascadeClassifier &faceCascade,
-    CascadeClassifier &eyeCascade,
-    double invScale) {
+DetectionMetrics runDetectionPipeline(const Mat &smallGray, Mat &displayFrame, CascadeClassifier &faceCascade, CascadeClassifier &eyeCascade, double invScale) {
   DetectionMetrics metrics;
 
   vector<Rect> faces;
 
   auto faceStart = high_resolution_clock::now();
-  faceCascade.detectMultiScale(
-      smallGray,
-      faces,
-      1.1,
-      4,
-      0,
-      Size(30, 30));
+  faceCascade.detectMultiScale(smallGray, faces, 1.1, 4, 0, Size(30, 30));
   auto faceEnd = high_resolution_clock::now();
 
-  metrics.faceMs =
-      duration_cast<microseconds>(faceEnd - faceStart).count() / 1000.0;
-
+  metrics.faceMs = duration_cast<microseconds>(faceEnd - faceStart).count() / 1000.0;
   metrics.faceCount = static_cast<int>(faces.size());
 
   if (faces.empty()) {
@@ -643,11 +471,7 @@ DetectionMetrics runDetectionPipeline(
   // Match the original program: only process the first detected face.
   const Rect &smallFace = faces.front();
 
-  Rect face(
-      cvRound(smallFace.x * invScale),
-      cvRound(smallFace.y * invScale),
-      cvRound(smallFace.width * invScale),
-      cvRound(smallFace.height * invScale));
+  Rect face(cvRound(smallFace.x * invScale), cvRound(smallFace.y * invScale), cvRound(smallFace.width * invScale), cvRound(smallFace.height * invScale));
 
   face &= Rect(0, 0, displayFrame.cols, displayFrame.rows);
 
@@ -657,53 +481,27 @@ DetectionMetrics runDetectionPipeline(
 
   auto drawStart = high_resolution_clock::now();
 
-  rectangle(
-      displayFrame,
-      face,
-      Scalar(0, 0, 255),
-      2);
+  rectangle(displayFrame, face, Scalar(0, 0, 255), 2);
 
-  putText(
-      displayFrame,
-      "Face",
-      Point(face.x, max(0, face.y - 5)),
-      FONT_HERSHEY_SIMPLEX,
-      0.5,
-      Scalar(0, 0, 255),
-      1);
+  putText(displayFrame, "Face", Point(face.x, max(0, face.y - 5)), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 255), 1);
 
-  metrics.drawMs +=
-      duration_cast<microseconds>(
-          high_resolution_clock::now() - drawStart)
-          .count() /
-      1000.0;
+  metrics.drawMs += duration_cast<microseconds>(high_resolution_clock::now() - drawStart).count() / 1000.0;
 
   Mat faceROI = smallGray(smallFace);
   vector<Rect> eyes;
 
   auto eyeStart = high_resolution_clock::now();
-  eyeCascade.detectMultiScale(
-      faceROI,
-      eyes,
-      1.1,
-      4,
-      0,
-      Size(15, 15));
+  eyeCascade.detectMultiScale(faceROI, eyes, 1.1, 4, 0, Size(15, 15));
   auto eyeEnd = high_resolution_clock::now();
 
-  metrics.eyeMs =
-      duration_cast<microseconds>(eyeEnd - eyeStart).count() / 1000.0;
+  metrics.eyeMs = duration_cast<microseconds>(eyeEnd - eyeStart).count() / 1000.0;
 
   metrics.eyeCount = static_cast<int>(eyes.size());
 
   drawStart = high_resolution_clock::now();
 
   for (const Rect &smallEye : eyes) {
-    Rect eyeGlobal(
-        cvRound((smallFace.x + smallEye.x) * invScale),
-        cvRound((smallFace.y + smallEye.y) * invScale),
-        cvRound(smallEye.width * invScale),
-        cvRound(smallEye.height * invScale));
+    Rect eyeGlobal(cvRound((smallFace.x + smallEye.x) * invScale), cvRound((smallFace.y + smallEye.y) * invScale), cvRound(smallEye.width * invScale), cvRound(smallEye.height * invScale));
 
     eyeGlobal &= Rect(0, 0, displayFrame.cols, displayFrame.rows);
 
@@ -716,129 +514,58 @@ DetectionMetrics runDetectionPipeline(
     double eyeCenterX = smallEye.x + smallEye.width * 0.5;
     double faceCenterX = smallFace.width * 0.5;
 
-    string eyeLabel =
-        eyeCenterX < faceCenterX ? "R Eye" : "L Eye";
+    string eyeLabel = eyeCenterX < faceCenterX ? "R Eye" : "L Eye";
 
-    rectangle(
-        displayFrame,
-        eyeGlobal,
-        Scalar(0, 255, 0),
-        2);
+    rectangle(displayFrame, eyeGlobal, Scalar(0, 255, 0), 2);
 
-    putText(
-        displayFrame,
-        eyeLabel,
-        Point(eyeGlobal.x, max(0, eyeGlobal.y - 4)),
-        FONT_HERSHEY_SIMPLEX,
-        0.4,
-        Scalar(0, 255, 0),
-        1);
+    putText(displayFrame, eyeLabel, Point(eyeGlobal.x, max(0, eyeGlobal.y - 4)), FONT_HERSHEY_SIMPLEX, 0.4, Scalar(0, 255, 0), 1);
   }
 
-  metrics.drawMs +=
-      duration_cast<microseconds>(
-          high_resolution_clock::now() - drawStart)
-          .count() /
-      1000.0;
+  metrics.drawMs += duration_cast<microseconds>(high_resolution_clock::now() - drawStart).count() / 1000.0;
 
   auto earStart = high_resolution_clock::now();
 
-  int earWidth =
-      static_cast<int>(face.width * 0.18);
+  int earWidth = static_cast<int>(face.width * 0.18);
 
-  int earHeight =
-      static_cast<int>(face.height * 0.35);
+  int earHeight = static_cast<int>(face.height * 0.35);
 
-  int earY =
-      face.y + static_cast<int>(face.height * 0.28);
+  int earY = face.y + static_cast<int>(face.height * 0.28);
 
   Rect leftEarRect;
   Rect rightEarRect;
 
   if (earWidth > 0 && earHeight > 0) {
-    leftEarRect = Rect(
-        max(
-            0,
-            face.x - static_cast<int>(earWidth * 0.6)),
-        earY,
-        earWidth,
-        earHeight);
+    leftEarRect = Rect(max(0, face.x - static_cast<int>(earWidth * 0.6)), earY, earWidth, earHeight);
 
-    rightEarRect = Rect(
-        min(
-            displayFrame.cols - earWidth,
-            face.x + face.width -
-                static_cast<int>(earWidth * 0.4)),
-        earY,
-        earWidth,
-        earHeight);
+    rightEarRect = Rect(min(displayFrame.cols - earWidth, face.x + face.width - static_cast<int>(earWidth * 0.4)), earY, earWidth, earHeight);
 
-    leftEarRect &=
-        Rect(0, 0, displayFrame.cols, displayFrame.rows);
+    leftEarRect &= Rect(0, 0, displayFrame.cols, displayFrame.rows);
 
-    rightEarRect &=
-        Rect(0, 0, displayFrame.cols, displayFrame.rows);
+    rightEarRect &= Rect(0, 0, displayFrame.cols, displayFrame.rows);
   }
 
-  metrics.earMs =
-      duration_cast<microseconds>(
-          high_resolution_clock::now() - earStart)
-          .count() /
-      1000.0;
+  metrics.earMs = duration_cast<microseconds>(high_resolution_clock::now() - earStart).count() / 1000.0;
 
   drawStart = high_resolution_clock::now();
 
   if (leftEarRect.width > 0 && leftEarRect.height > 0) {
-    rectangle(
-        displayFrame,
-        leftEarRect,
-        Scalar(255, 0, 0),
-        2);
+    rectangle(displayFrame, leftEarRect, Scalar(255, 0, 0), 2);
 
-    putText(
-        displayFrame,
-        "L Ear",
-        Point(leftEarRect.x, max(0, leftEarRect.y - 4)),
-        FONT_HERSHEY_SIMPLEX,
-        0.4,
-        Scalar(255, 0, 0),
-        1);
+    putText(displayFrame, "L Ear", Point(leftEarRect.x, max(0, leftEarRect.y - 4)), FONT_HERSHEY_SIMPLEX, 0.4, Scalar(255, 0, 0), 1);
   }
 
   if (rightEarRect.width > 0 && rightEarRect.height > 0) {
-    rectangle(
-        displayFrame,
-        rightEarRect,
-        Scalar(255, 255, 0),
-        2);
+    rectangle(displayFrame, rightEarRect, Scalar(255, 255, 0), 2);
 
-    putText(
-        displayFrame,
-        "R Ear",
-        Point(rightEarRect.x, max(0, rightEarRect.y - 4)),
-        FONT_HERSHEY_SIMPLEX,
-        0.4,
-        Scalar(255, 255, 0),
-        1);
+    putText(displayFrame, "R Ear", Point(rightEarRect.x, max(0, rightEarRect.y - 4)), FONT_HERSHEY_SIMPLEX, 0.4, Scalar(255, 255, 0), 1);
   }
 
-  metrics.drawMs +=
-      duration_cast<microseconds>(
-          high_resolution_clock::now() - drawStart)
-          .count() /
-      1000.0;
+  metrics.drawMs += duration_cast<microseconds>(high_resolution_clock::now() - drawStart).count() / 1000.0;
 
   return metrics;
 }
 
-// ============================================================
-// Benchmark data structures
-// ============================================================
-
-enum class BenchmarkMode {
-  CPU,
-  GPU_ACCELERATED
-};
+enum class BenchmarkMode { CPU, GPU_ACCELERATED };
 
 struct FrameMetrics {
   int frameIndex = 0;
@@ -882,17 +609,12 @@ struct PassResults {
   double wallTimeMs = 0.0;
 };
 
-// ============================================================
-// Statistics helpers
-// ============================================================
-
 double mean(const vector<double> &values) {
   if (values.empty()) {
     return 0.0;
   }
 
-  return accumulate(values.begin(), values.end(), 0.0) /
-         static_cast<double>(values.size());
+  return accumulate(values.begin(), values.end(), 0.0) / static_cast<double>(values.size());
 }
 
 double percentile(vector<double> values, double p) {
@@ -902,8 +624,7 @@ double percentile(vector<double> values, double p) {
 
   sort(values.begin(), values.end());
 
-  double position =
-      (p / 100.0) * static_cast<double>(values.size() - 1);
+  double position = (p / 100.0) * static_cast<double>(values.size() - 1);
 
   size_t lower = static_cast<size_t>(floor(position));
   size_t upper = static_cast<size_t>(ceil(position));
@@ -914,13 +635,10 @@ double percentile(vector<double> values, double p) {
 
   double weight = position - static_cast<double>(lower);
 
-  return values[lower] * (1.0 - weight) +
-         values[upper] * weight;
+  return values[lower] * (1.0 - weight) + values[upper] * weight;
 }
 
-vector<double> collectMetric(
-    const vector<FrameMetrics> &frames,
-    double FrameMetrics::*member) {
+vector<double> collectMetric(const vector<FrameMetrics> &frames, double FrameMetrics::*member) {
   vector<double> values;
   values.reserve(frames.size());
 
@@ -931,28 +649,12 @@ vector<double> collectMetric(
   return values;
 }
 
-// ============================================================
-// Run one benchmark pass over the recorded video
-// ============================================================
-
-bool runBenchmarkPass(
-    const string &inputVideo,
-    BenchmarkMode mode,
-    CascadeClassifier &faceCascade,
-    CascadeClassifier &eyeCascade,
-    OpenCLContext *ocl,
-    PassResults &results) {
+bool runBenchmarkPass(const string &inputVideo, BenchmarkMode mode, CascadeClassifier &faceCascade, CascadeClassifier &eyeCascade, OpenCLContext *ocl, PassResults &results) {
 
   results.mode = mode;
-  results.label =
-      mode == BenchmarkMode::CPU
-          ? "CPU"
-          : "GPU-ACCELERATED (GPU preprocess + CPU Haar detection)";
+  results.label = mode == BenchmarkMode::CPU ? "CPU" : "GPU-ACCELERATED (GPU preprocess + CPU Haar detection)";
 
-  cout << "\n================ PHASE "
-       << (mode == BenchmarkMode::CPU ? "2" : "3")
-       << ": " << results.label
-       << " ================\n";
+  cout << "\n================ PHASE " << (mode == BenchmarkMode::CPU ? "2" : "3") << ": " << results.label << " ================\n";
 
   VideoCapture cap(inputVideo);
 
@@ -961,10 +663,8 @@ bool runBenchmarkPass(
     return false;
   }
 
-  int fullWidth =
-      static_cast<int>(cap.get(CAP_PROP_FRAME_WIDTH));
-  int fullHeight =
-      static_cast<int>(cap.get(CAP_PROP_FRAME_HEIGHT));
+  int fullWidth = static_cast<int>(cap.get(CAP_PROP_FRAME_WIDTH));
+  int fullHeight = static_cast<int>(cap.get(CAP_PROP_FRAME_HEIGHT));
 
   if (fullWidth <= 0 || fullHeight <= 0) {
     cerr << "Invalid recorded video dimensions\n";
@@ -1001,12 +701,7 @@ bool runBenchmarkPass(
     double gpuKernelMs = 0.0;
 
     if (mode == BenchmarkMode::CPU) {
-      metrics.preprocessMs = processCpu(
-          frame,
-          gray,
-          smallGray,
-          smallWidth,
-          smallHeight);
+      metrics.preprocessMs = processCpu(frame, gray, smallGray, smallWidth, smallHeight);
 
     } else {
       if (ocl == nullptr) {
@@ -1016,16 +711,7 @@ bool runBenchmarkPass(
 
       double gpuEndToEndMs = 0.0;
 
-      if (!processGpu(
-              *ocl,
-              frame,
-              smallGray,
-              fullWidth,
-              fullHeight,
-              smallWidth,
-              smallHeight,
-              gpuKernelMs,
-              gpuEndToEndMs)) {
+      if (!processGpu(*ocl, frame, smallGray, fullWidth, fullHeight, smallWidth, smallHeight, gpuKernelMs, gpuEndToEndMs)) {
         cerr << "GPU preprocessing failed on frame " << frameIndex << "\n";
         return false;
       }
@@ -1038,12 +724,7 @@ bool runBenchmarkPass(
     // frame clone is needed or added to the benchmark workload.
     Mat &annotatedFrame = frame;
 
-    DetectionMetrics detection = runDetectionPipeline(
-        smallGray,
-        annotatedFrame,
-        faceCascade,
-        eyeCascade,
-        invScale);
+    DetectionMetrics detection = runDetectionPipeline(smallGray, annotatedFrame, faceCascade, eyeCascade, invScale);
 
     metrics.faceMs = detection.faceMs;
     metrics.eyeMs = detection.eyeMs;
@@ -1052,38 +733,22 @@ bool runBenchmarkPass(
     metrics.faces = detection.faceCount;
     metrics.eyes = detection.eyeCount;
 
-    metrics.detectionMs =
-        metrics.faceMs +
-        metrics.eyeMs +
-        metrics.earMs;
+    metrics.detectionMs = metrics.faceMs + metrics.eyeMs + metrics.earMs;
 
-    metrics.computeMs =
-        metrics.preprocessMs +
-        metrics.detectionMs;
+    metrics.computeMs = metrics.preprocessMs + metrics.detectionMs;
 
-    metrics.pipelineMs =
-        metrics.computeMs +
-        metrics.drawMs;
+    metrics.pipelineMs = metrics.computeMs + metrics.drawMs;
 
-    metrics.processingFps =
-        metrics.computeMs > 0.0
-            ? 1000.0 / metrics.computeMs
-            : 0.0;
+    metrics.processingFps = metrics.computeMs > 0.0 ? 1000.0 / metrics.computeMs : 0.0;
 
-    metrics.pipelineFps =
-        metrics.pipelineMs > 0.0
-            ? 1000.0 / metrics.pipelineMs
-            : 0.0;
+    metrics.pipelineFps = metrics.pipelineMs > 0.0 ? 1000.0 / metrics.pipelineMs : 0.0;
 
     auto now = steady_clock::now();
-    double utilIntervalSec =
-        duration_cast<milliseconds>(now - lastUtilTime).count() /
-        1000.0;
+    double utilIntervalSec = duration_cast<milliseconds>(now - lastUtilTime).count() / 1000.0;
 
     if (utilIntervalSec >= 0.5) {
       CpuSnapshot currentCpuSnap = readCpuSnapshot();
-      currentCpuUsage =
-          calculateCpuUsage(lastCpuSnap, currentCpuSnap);
+      currentCpuUsage = calculateCpuUsage(lastCpuSnap, currentCpuSnap);
       currentGpuUsage = readGpuUsage();
 
       lastCpuSnap = currentCpuSnap;
@@ -1115,24 +780,15 @@ bool runBenchmarkPass(
 
   results.totalFramesRead = frameIndex;
   results.measuredFrames = static_cast<int>(results.frames.size());
-  results.wallTimeMs =
-      duration_cast<milliseconds>(passEnd - passStart).count();
+  results.wallTimeMs = duration_cast<milliseconds>(passEnd - passStart).count();
 
-  cout << "Read " << results.totalFramesRead << " frames; "
-       << results.measuredFrames << " measured after "
-       << WARMUP_FRAMES << " warm-up frames.\n";
+  cout << "Read " << results.totalFramesRead << " frames; " << results.measuredFrames << " measured after " << WARMUP_FRAMES << " warm-up frames.\n";
 
   return results.measuredFrames > 0;
 }
-
-// ============================================================
-// Log output
-// ============================================================
-
+// Log
 void writeFrameTable(ofstream &log, const PassResults &results) {
-  log << "\n================ PER-FRAME DATA: "
-      << results.label
-      << " ================\n";
+  log << "\n================ PER-FRAME DATA: " << results.label << " ================\n";
 
   log << "frame,preprocess_ms,gpu_kernel_ms,face_ms,eye_ms,ear_ms,"
          "detection_ms,draw_ms,compute_ms,pipeline_ms,processing_fps,"
@@ -1141,22 +797,7 @@ void writeFrameTable(ofstream &log, const PassResults &results) {
   log << fixed << setprecision(4);
 
   for (const FrameMetrics &f : results.frames) {
-    log << f.frameIndex << ","
-        << f.preprocessMs << ","
-        << f.gpuKernelMs << ","
-        << f.faceMs << ","
-        << f.eyeMs << ","
-        << f.earMs << ","
-        << f.detectionMs << ","
-        << f.drawMs << ","
-        << f.computeMs << ","
-        << f.pipelineMs << ","
-        << f.processingFps << ","
-        << f.pipelineFps << ","
-        << f.faces << ","
-        << f.eyes << ","
-        << f.cpuUsage << ","
-        << f.gpuUsage << "\n";
+    log << f.frameIndex << "," << f.preprocessMs << "," << f.gpuKernelMs << "," << f.faceMs << "," << f.eyeMs << "," << f.earMs << "," << f.detectionMs << "," << f.drawMs << "," << f.computeMs << "," << f.pipelineMs << "," << f.processingFps << "," << f.pipelineFps << "," << f.faces << "," << f.eyes << "," << f.cpuUsage << "," << f.gpuUsage << "\n";
   }
 }
 
@@ -1193,24 +834,15 @@ struct SummaryNumbers {
 SummaryNumbers summarize(const PassResults &results) {
   SummaryNumbers s;
 
-  vector<double> preprocess =
-      collectMetric(results.frames, &FrameMetrics::preprocessMs);
-  vector<double> kernel =
-      collectMetric(results.frames, &FrameMetrics::gpuKernelMs);
-  vector<double> face =
-      collectMetric(results.frames, &FrameMetrics::faceMs);
-  vector<double> eye =
-      collectMetric(results.frames, &FrameMetrics::eyeMs);
-  vector<double> ear =
-      collectMetric(results.frames, &FrameMetrics::earMs);
-  vector<double> detection =
-      collectMetric(results.frames, &FrameMetrics::detectionMs);
-  vector<double> draw =
-      collectMetric(results.frames, &FrameMetrics::drawMs);
-  vector<double> compute =
-      collectMetric(results.frames, &FrameMetrics::computeMs);
-  vector<double> pipeline =
-      collectMetric(results.frames, &FrameMetrics::pipelineMs);
+  vector<double> preprocess = collectMetric(results.frames, &FrameMetrics::preprocessMs);
+  vector<double> kernel = collectMetric(results.frames, &FrameMetrics::gpuKernelMs);
+  vector<double> face = collectMetric(results.frames, &FrameMetrics::faceMs);
+  vector<double> eye = collectMetric(results.frames, &FrameMetrics::eyeMs);
+  vector<double> ear = collectMetric(results.frames, &FrameMetrics::earMs);
+  vector<double> detection = collectMetric(results.frames, &FrameMetrics::detectionMs);
+  vector<double> draw = collectMetric(results.frames, &FrameMetrics::drawMs);
+  vector<double> compute = collectMetric(results.frames, &FrameMetrics::computeMs);
+  vector<double> pipeline = collectMetric(results.frames, &FrameMetrics::pipelineMs);
 
   s.avgPreprocess = mean(preprocess);
   s.medianPreprocess = percentile(preprocess, 50.0);
@@ -1231,11 +863,9 @@ SummaryNumbers summarize(const PassResults &results) {
   s.avgPipeline = mean(pipeline);
   s.p95Pipeline = percentile(pipeline, 95.0);
 
-  s.processingFps =
-      s.avgCompute > 0.0 ? 1000.0 / s.avgCompute : 0.0;
+  s.processingFps = s.avgCompute > 0.0 ? 1000.0 / s.avgCompute : 0.0;
 
-  s.pipelineFps =
-      s.avgPipeline > 0.0 ? 1000.0 / s.avgPipeline : 0.0;
+  s.pipelineFps = s.avgPipeline > 0.0 ? 1000.0 / s.avgPipeline : 0.0;
 
   s.avgCpuUsage = mean(results.cpuUsageSamples);
 
@@ -1251,237 +881,154 @@ SummaryNumbers summarize(const PassResults &results) {
   return s;
 }
 
-void writeSummary(
-    ofstream &log,
-    const PassResults &results,
-    const SummaryNumbers &s) {
-  log << "\n================ SUMMARY: "
-      << results.label
-      << " ================\n";
+void writeSummary(ofstream &log, const PassResults &results, const SummaryNumbers &s) {
+  log << "\n================ SUMMARY: " << results.label << " ================\n";
 
   log << fixed << setprecision(3);
 
-  log << "Frames read                         : "
-      << results.totalFramesRead << "\n";
+  log << "Frames read                         : " << results.totalFramesRead << "\n";
 
-  log << "Warm-up frames excluded             : "
-      << WARMUP_FRAMES << "\n";
+  log << "Warm-up frames excluded             : " << WARMUP_FRAMES << "\n";
 
-  log << "Measured frames                     : "
-      << results.measuredFrames << "\n";
+  log << "Measured frames                     : " << results.measuredFrames << "\n";
 
-  log << "Pass wall time                      : "
-      << results.wallTimeMs / 1000.0 << " s\n";
+  log << "Pass wall time                      : " << results.wallTimeMs / 1000.0 << " s\n";
 
   log << "\nPREPROCESSING\n";
-  log << "Average preprocessing               : "
-      << s.avgPreprocess << " ms/frame\n";
-  log << "Median preprocessing                : "
-      << s.medianPreprocess << " ms/frame\n";
-  log << "P95 preprocessing                   : "
-      << s.p95Preprocess << " ms/frame\n";
+  log << "Average preprocessing               : " << s.avgPreprocess << " ms/frame\n";
+  log << "Median preprocessing                : " << s.medianPreprocess << " ms/frame\n";
+  log << "P95 preprocessing                   : " << s.p95Preprocess << " ms/frame\n";
 
   if (results.mode == BenchmarkMode::GPU_ACCELERATED) {
-    log << "Average GPU kernel only             : "
-        << s.avgGpuKernel << " ms/frame\n";
+    log << "Average GPU kernel only             : " << s.avgGpuKernel << " ms/frame\n";
     log << "GPU preprocessing above is end-to-end host->GPU + kernel + GPU->host.\n";
   }
 
   log << "\nDETECTION / ANNOTATION\n";
-  log << "Average face detection              : "
-      << s.avgFace << " ms/frame\n";
-  log << "Average eye detection               : "
-      << s.avgEye << " ms/frame\n";
-  log << "Average ear estimation              : "
-      << s.avgEar << " ms/frame\n";
-  log << "Average total detection             : "
-      << s.avgDetection << " ms/frame\n";
-  log << "Average drawing                     : "
-      << s.avgDraw << " ms/frame\n";
+  log << "Average face detection              : " << s.avgFace << " ms/frame\n";
+  log << "Average eye detection               : " << s.avgEye << " ms/frame\n";
+  log << "Average ear estimation              : " << s.avgEar << " ms/frame\n";
+  log << "Average total detection             : " << s.avgDetection << " ms/frame\n";
+  log << "Average drawing                     : " << s.avgDraw << " ms/frame\n";
 
   log << "\nCORE COMPUTE (preprocess + detection; excludes drawing)\n";
-  log << "Average compute                     : "
-      << s.avgCompute << " ms/frame\n";
-  log << "Median compute                      : "
-      << s.medianCompute << " ms/frame\n";
-  log << "P95 compute                         : "
-      << s.p95Compute << " ms/frame\n";
-  log << "Processing throughput               : "
-      << s.processingFps << " FPS\n";
+  log << "Average compute                     : " << s.avgCompute << " ms/frame\n";
+  log << "Median compute                      : " << s.medianCompute << " ms/frame\n";
+  log << "P95 compute                         : " << s.p95Compute << " ms/frame\n";
+  log << "Processing throughput               : " << s.processingFps << " FPS\n";
 
   log << "\nFULL MEASURED PIPELINE (compute + drawing)\n";
-  log << "Average pipeline                    : "
-      << s.avgPipeline << " ms/frame\n";
-  log << "P95 pipeline                        : "
-      << s.p95Pipeline << " ms/frame\n";
-  log << "Pipeline throughput                 : "
-      << s.pipelineFps << " FPS\n";
+  log << "Average pipeline                    : " << s.avgPipeline << " ms/frame\n";
+  log << "P95 pipeline                        : " << s.p95Pipeline << " ms/frame\n";
+  log << "Pipeline throughput                 : " << s.pipelineFps << " FPS\n";
 
   log << "\nUTILIZATION\n";
-  log << "Average sampled CPU utilization     : "
-      << s.avgCpuUsage << " %\n";
+  log << "Average sampled CPU utilization     : " << s.avgCpuUsage << " %\n";
 
   if (s.avgGpuUsage >= 0.0) {
-    log << "Average sampled GPU utilization     : "
-        << s.avgGpuUsage << " %\n";
+    log << "Average sampled GPU utilization     : " << s.avgGpuUsage << " %\n";
   } else {
     log << "Average sampled GPU utilization     : N/A\n";
   }
 
   log << "\nDETECTION COUNTS\n";
-  log << "Total face detections               : "
-      << s.totalFaces << "\n";
-  log << "Total eye detections                : "
-      << s.totalEyes << "\n";
+  log << "Total face detections               : " << s.totalFaces << "\n";
+  log << "Total eye detections                : " << s.totalEyes << "\n";
 }
 
-void writeComparison(
-    ofstream &log,
-    const SummaryNumbers &cpu,
-    const SummaryNumbers &gpu) {
+void writeComparison(ofstream &log, const SummaryNumbers &cpu, const SummaryNumbers &gpu) {
   log << "\n================ CPU VS GPU COMPARISON ================\n";
   log << fixed << setprecision(3);
 
   if (gpu.avgPreprocess > 0.0) {
-    log << "Preprocessing speedup (CPU/GPU E2E) : "
-        << cpu.avgPreprocess / gpu.avgPreprocess
-        << "x\n";
+    log << "Preprocessing speedup (CPU/GPU E2E) : " << cpu.avgPreprocess / gpu.avgPreprocess << "x\n";
   }
 
   if (gpu.avgCompute > 0.0) {
-    log << "Core compute speedup                 : "
-        << cpu.avgCompute / gpu.avgCompute
-        << "x\n";
+    log << "Core compute speedup                 : " << cpu.avgCompute / gpu.avgCompute << "x\n";
   }
 
   if (gpu.avgPipeline > 0.0) {
-    log << "Full measured pipeline speedup       : "
-        << cpu.avgPipeline / gpu.avgPipeline
-        << "x\n";
+    log << "Full measured pipeline speedup       : " << cpu.avgPipeline / gpu.avgPipeline << "x\n";
   }
 
-  log << "CPU processing throughput            : "
-      << cpu.processingFps << " FPS\n";
+  log << "CPU processing throughput            : " << cpu.processingFps << " FPS\n";
 
-  log << "GPU-accelerated processing throughput: "
-      << gpu.processingFps << " FPS\n";
+  log << "GPU-accelerated processing throughput: " << gpu.processingFps << " FPS\n";
 
-  log << "CPU P95 compute                      : "
-      << cpu.p95Compute << " ms/frame\n";
+  log << "CPU P95 compute                      : " << cpu.p95Compute << " ms/frame\n";
 
-  log << "GPU P95 compute                      : "
-      << gpu.p95Compute << " ms/frame\n";
+  log << "GPU P95 compute                      : " << gpu.p95Compute << " ms/frame\n";
 
-  log << "CPU total face detections            : "
-      << cpu.totalFaces << "\n";
+  log << "CPU total face detections            : " << cpu.totalFaces << "\n";
 
-  log << "GPU total face detections            : "
-      << gpu.totalFaces << "\n";
+  log << "GPU total face detections            : " << gpu.totalFaces << "\n";
 
-  log << "CPU total eye detections             : "
-      << cpu.totalEyes << "\n";
+  log << "CPU total eye detections             : " << cpu.totalEyes << "\n";
 
-  log << "GPU total eye detections             : "
-      << gpu.totalEyes << "\n";
+  log << "GPU total eye detections             : " << gpu.totalEyes << "\n";
 
   log << "\nIMPORTANT: Haar face/eye detection runs on the CPU in BOTH passes.\n";
   log << "The controlled variable is CPU preprocessing versus OpenCL GPU preprocessing.\n";
   log << "Video decoding, recording, and log-file I/O are outside the per-frame compute timers.\n";
 }
 
-// ============================================================
-// Main
-// ============================================================
+int main(int argc, char *argv[]) {
 
-int main() {
+  if (argc > 1) {
+    RECORD_SECONDS = std::stoi(argv[1]);
+  }
+
   cout << "CPU vs GPU Controlled Video Test Bench\n";
   cout << "======================================\n";
-  cout << "1) Record one camera video\n";
-  cout << "2) Replay it through CPU preprocessing + CPU Haar detection\n";
-  cout << "3) Replay the same video through GPU preprocessing + CPU Haar detection\n";
-  cout << "4) Write per-frame data and final comparison to "
-       << BENCHMARK_LOG << "\n";
-
-  // ----------------------------------------------------------
-  // Load classifiers once so both passes use identical models.
-  // ----------------------------------------------------------
+  cout << "Record duration " << RECORD_SECONDS << "s" << endl;
+  cout << "1) Record one camera video " << PRIMARY_INPUT_VIDEO << endl;
+  cout << "2) Replay it through CPU preprocessing + CPU Haar detection" << endl;
+  cout << "3) Replay the same video through GPU preprocessing + CPU Haar detection" << endl;
+  cout << "4) Write per-frame data and final comparison to " << BENCHMARK_LOG << endl;
 
   CascadeClassifier faceCascade;
   CascadeClassifier eyeCascade;
 
   string cascadePath = "/usr/share/opencv4/haarcascades/";
 
-  if (!faceCascade.load(
-          cascadePath + "haarcascade_frontalface_default.xml") ||
-      !eyeCascade.load(
-          cascadePath + "haarcascade_eye.xml")) {
-    cerr << "Could not load Haar cascade classifiers\n";
+  if (!faceCascade.load(cascadePath + "haarcascade_frontalface_default.xml") || !eyeCascade.load(cascadePath + "haarcascade_eye.xml")) {
+    cerr << "Could not load Haar cascade classifiers";
     return 1;
   }
 
-  // ----------------------------------------------------------
   // Phase 1: record exactly one test video.
-  // ----------------------------------------------------------
-
   RecordingInfo recording;
 
   if (!recordTestVideo(recording)) {
     return 1;
   }
 
-  cout << "\nCooling down for " << COOLDOWN_SECONDS
-       << " seconds before CPU benchmark...\n";
-  this_thread::sleep_for(seconds(COOLDOWN_SECONDS));
+  // cout << "\nCooling down for " << COOLDOWN_SECONDS << " seconds before CPU benchmark..." << endl;
+  // this_thread::sleep_for(seconds(COOLDOWN_SECONDS));
 
-  // ----------------------------------------------------------
   // Phase 2: CPU benchmark.
-  // ----------------------------------------------------------
-
   PassResults cpuResults;
 
-  if (!runBenchmarkPass(
-          recording.path,
-          BenchmarkMode::CPU,
-          faceCascade,
-          eyeCascade,
-          nullptr,
-          cpuResults)) {
+  if (!runBenchmarkPass(recording.path, BenchmarkMode::CPU, faceCascade, eyeCascade, nullptr, cpuResults)) {
     cerr << "CPU benchmark failed\n";
     return 1;
   }
 
-  cout << "\nCooling down for " << COOLDOWN_SECONDS
-       << " seconds before GPU benchmark...\n";
-  this_thread::sleep_for(seconds(COOLDOWN_SECONDS));
+  // cout << "\nCooling down for " << COOLDOWN_SECONDS << " seconds before GPU benchmark..." << endl;
+  // this_thread::sleep_for(seconds(COOLDOWN_SECONDS));
 
-  // ----------------------------------------------------------
   // Initialize OpenCL only after recording and CPU benchmark.
-  // ----------------------------------------------------------
-
   OpenCLContext ocl;
-
-  if (!initOpenCL(
-          ocl,
-          "kernel.cl",
-          recording.width,
-          recording.height)) {
-    cerr << "Failed to initialize OpenCL GPU pipeline\n";
+  if (!initOpenCL(ocl, "kernel.cl", recording.width, recording.height)) {
+    cerr << "Failed to initialize OpenCL GPU pipeline" << endl;
     return 1;
   }
 
-  // ----------------------------------------------------------
   // Phase 3: GPU-accelerated benchmark over same video.
-  // ----------------------------------------------------------
-
   PassResults gpuResults;
 
-  bool gpuOk = runBenchmarkPass(
-      recording.path,
-      BenchmarkMode::GPU_ACCELERATED,
-      faceCascade,
-      eyeCascade,
-      &ocl,
-      gpuResults);
+  bool gpuOk = runBenchmarkPass(recording.path, BenchmarkMode::GPU_ACCELERATED, faceCascade, eyeCascade, &ocl, gpuResults);
 
   cleanupOpenCL(ocl);
 
@@ -1490,14 +1037,8 @@ int main() {
     return 1;
   }
 
-  // ----------------------------------------------------------
   // Phase 4: write all results after timing has finished.
-  // This avoids benchmark.log I/O perturbing measured frames.
-  // ----------------------------------------------------------
-
-  ofstream benchmarkLog(
-      BENCHMARK_LOG,
-      ios::out | ios::trunc);
+  ofstream benchmarkLog(BENCHMARK_LOG, ios::out | ios::trunc);
 
   if (!benchmarkLog.is_open()) {
     cerr << "Could not create " << BENCHMARK_LOG << "\n";
@@ -1506,17 +1047,11 @@ int main() {
 
   benchmarkLog << "================ CONTROLLED CPU VS GPU VIDEO TEST BENCH ================\n";
   benchmarkLog << "Recorded input video                : " << recording.path << "\n";
-  benchmarkLog << "Resolution                          : "
-               << recording.width << "x" << recording.height << "\n";
-  benchmarkLog << "Requested camera rate               : "
-               << recording.fps << " FPS\n";
-  benchmarkLog << "Recorded frames                     : "
-               << recording.frames << "\n";
-  benchmarkLog << "Recorded duration                   : "
-               << fixed << setprecision(3)
-               << recording.durationSec << " s\n";
-  benchmarkLog << "Warm-up frames excluded per pass    : "
-               << WARMUP_FRAMES << "\n";
+  benchmarkLog << "Resolution                          : " << recording.width << "x" << recording.height << "\n";
+  benchmarkLog << "Requested camera rate               : " << recording.fps << " FPS\n";
+  benchmarkLog << "Recorded frames                     : " << recording.frames << "\n";
+  benchmarkLog << "Recorded duration                   : " << fixed << setprecision(3) << recording.durationSec << " s\n";
+  benchmarkLog << "Warm-up frames excluded per pass    : " << WARMUP_FRAMES << "\n";
   benchmarkLog << "\nCPU PASS: CPU cvtColor + resize + CPU Haar face/eye detection.\n";
   benchmarkLog << "GPU PASS: OpenCL BGR->gray/downscale + CPU Haar face/eye detection.\n";
   benchmarkLog << "Both passes read the exact same recorded video file.\n";
@@ -1530,42 +1065,25 @@ int main() {
   SummaryNumbers gpuSummary = summarize(gpuResults);
   writeSummary(benchmarkLog, gpuResults, gpuSummary);
 
-  writeComparison(
-      benchmarkLog,
-      cpuSummary,
-      gpuSummary);
+  writeComparison(benchmarkLog, cpuSummary, gpuSummary);
 
   benchmarkLog.close();
 
-  // ----------------------------------------------------------
-  // Compact console result.
-  // ----------------------------------------------------------
-
+  // console output
   cout << "\n================ TEST COMPLETE ================\n";
   cout << fixed << setprecision(3);
-  cout << "CPU preprocess       : "
-       << cpuSummary.avgPreprocess << " ms/frame\n";
-  cout << "GPU preprocess E2E   : "
-       << gpuSummary.avgPreprocess << " ms/frame\n";
-  cout << "GPU kernel only      : "
-       << gpuSummary.avgGpuKernel << " ms/frame\n";
-  cout << "CPU processing       : "
-       << cpuSummary.processingFps << " FPS\n";
-  cout << "GPU-accelerated      : "
-       << gpuSummary.processingFps << " FPS\n";
+  cout << "CPU preprocess       : " << cpuSummary.avgPreprocess << " ms/frame\n";
+  cout << "GPU preprocess E2E   : " << gpuSummary.avgPreprocess << " ms/frame\n";
+  cout << "GPU kernel only      : " << gpuSummary.avgGpuKernel << " ms/frame\n";
+  cout << "CPU processing       : " << cpuSummary.processingFps << " FPS\n";
+  cout << "GPU-accelerated      : " << gpuSummary.processingFps << " FPS\n";
 
   if (gpuSummary.avgPreprocess > 0.0) {
-    cout << "Preprocess speedup    : "
-         << cpuSummary.avgPreprocess /
-                gpuSummary.avgPreprocess
-         << "x\n";
+    cout << "Preprocess speedup    : " << cpuSummary.avgPreprocess / gpuSummary.avgPreprocess << "x\n";
   }
 
   if (gpuSummary.avgCompute > 0.0) {
-    cout << "Core compute speedup  : "
-         << cpuSummary.avgCompute /
-                gpuSummary.avgCompute
-         << "x\n";
+    cout << "Core compute speedup  : " << cpuSummary.avgCompute / gpuSummary.avgCompute << "x\n";
   }
 
   cout << "Results saved to      : " << BENCHMARK_LOG << "\n";
