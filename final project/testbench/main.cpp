@@ -10,7 +10,6 @@
 #include <numeric>
 #include <sstream>
 #include <string>
-#include <thread>
 #include <vector>
 
 using namespace cv;
@@ -21,8 +20,6 @@ using namespace std::chrono;
 
 static int RECORD_SECONDS = 10; // default
 static const int TARGET_CAMERA_FPS = 30;
-static const int WARMUP_FRAMES = 30;
-// static const int COOLDOWN_SECONDS = 0;
 static const char *BENCHMARK_LOG = "benchmark.log";
 static const char *PRIMARY_INPUT_VIDEO = "test_input.mp4";
 static VideoCapture *g_camera = nullptr;
@@ -754,22 +751,17 @@ bool runBenchmarkPass(const string &inputVideo, BenchmarkMode mode, CascadeClass
       lastCpuSnap = currentCpuSnap;
       lastUtilTime = now;
 
-      if (frameIndex >= WARMUP_FRAMES) {
-        results.cpuUsageSamples.push_back(currentCpuUsage);
+      results.cpuUsageSamples.push_back(currentCpuUsage);
 
-        if (currentGpuUsage >= 0.0) {
-          results.gpuUsageSamples.push_back(currentGpuUsage);
-        }
+      if (currentGpuUsage >= 0.0) {
+        results.gpuUsageSamples.push_back(currentGpuUsage);
       }
     }
 
     metrics.cpuUsage = currentCpuUsage;
     metrics.gpuUsage = currentGpuUsage;
 
-    // Warm-up frames execute the full pipeline but are not used in results.
-    if (frameIndex >= WARMUP_FRAMES) {
-      results.frames.push_back(metrics);
-    }
+    results.frames.push_back(metrics);
 
     frameIndex++;
   }
@@ -782,7 +774,7 @@ bool runBenchmarkPass(const string &inputVideo, BenchmarkMode mode, CascadeClass
   results.measuredFrames = static_cast<int>(results.frames.size());
   results.wallTimeMs = duration_cast<milliseconds>(passEnd - passStart).count();
 
-  cout << "Read " << results.totalFramesRead << " frames; " << results.measuredFrames << " measured after " << WARMUP_FRAMES << " warm-up frames.\n";
+  cout << "Read " << results.totalFramesRead << " frames; " << results.measuredFrames << " measured.\n";
 
   return results.measuredFrames > 0;
 }
@@ -887,8 +879,6 @@ void writeSummary(ofstream &log, const PassResults &results, const SummaryNumber
   log << fixed << setprecision(3);
 
   log << "Frames read                         : " << results.totalFramesRead << "\n";
-
-  log << "Warm-up frames excluded             : " << WARMUP_FRAMES << "\n";
 
   log << "Measured frames                     : " << results.measuredFrames << "\n";
 
@@ -1004,9 +994,6 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  // cout << "\nCooling down for " << COOLDOWN_SECONDS << " seconds before CPU benchmark..." << endl;
-  // this_thread::sleep_for(seconds(COOLDOWN_SECONDS));
-
   // Phase 2: CPU benchmark.
   PassResults cpuResults;
 
@@ -1014,9 +1001,6 @@ int main(int argc, char *argv[]) {
     cerr << "CPU benchmark failed\n";
     return 1;
   }
-
-  // cout << "\nCooling down for " << COOLDOWN_SECONDS << " seconds before GPU benchmark..." << endl;
-  // this_thread::sleep_for(seconds(COOLDOWN_SECONDS));
 
   // Initialize OpenCL only after recording and CPU benchmark.
   OpenCLContext ocl;
@@ -1051,7 +1035,6 @@ int main(int argc, char *argv[]) {
   benchmarkLog << "Requested camera rate               : " << recording.fps << " FPS\n";
   benchmarkLog << "Recorded frames                     : " << recording.frames << "\n";
   benchmarkLog << "Recorded duration                   : " << fixed << setprecision(3) << recording.durationSec << " s\n";
-  benchmarkLog << "Warm-up frames excluded per pass    : " << WARMUP_FRAMES << "\n";
   benchmarkLog << "\nCPU PASS: CPU cvtColor + resize + CPU Haar face/eye detection.\n";
   benchmarkLog << "GPU PASS: OpenCL BGR->gray/downscale + CPU Haar face/eye detection.\n";
   benchmarkLog << "Both passes read the exact same recorded video file.\n";
