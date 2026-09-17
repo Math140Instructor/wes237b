@@ -33,7 +33,7 @@ __kernel void bgr_to_gray_downscale_2x(__global const uchar *src, __global uchar
   uint gray4 = bgr_to_gray(src, bottom_right);
 
   // Average to produce one pixel in the downsampled 640x360 image
-  dst[y * dst_step + x] = (uchar)((gray1 + gray2 + gray3 + gray4) / 4);
+  dst[y * dst_step + x] = (uchar)((gray1 + gray2 + gray3 + gray4 + 2) / 4);
 }
 
 // kernel that draws color coded rectangular borders directly into the downsampled BGR frame
